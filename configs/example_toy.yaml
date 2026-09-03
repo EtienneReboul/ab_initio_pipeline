@@ -1,0 +1,46 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# example_toy — ubiquitin homodimer (verification vehicle, not real science)
+#
+# Two copies of human ubiquitin (P0CG48, 76 aa). ~152 tokens: trivial for
+# every ABCfold backend, MMseqs2 returns a deep MSA, PROSITE/InterProScan
+# return the ubiquitin domain cleanly, and the flexible C-terminal ...LRGG
+# tail gives the disorder / MoRF plots something to show. Use this to smoke-
+# test all three stages end-to-end before pointing the pipeline at real data.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: example_toy
+size_class: small
+
+sequences:
+  - type: protein
+    id: A
+    name: ubiquitin_A
+    sequence: "MQIFVKTLTGKTITLEVEPSDTIENVKAKIQDKEGIPPDQQRLIFAGKQLEDGRTLSDYNIQKESTLHLVLRLRGG"
+  - type: protein
+    id: B
+    name: ubiquitin_B
+    sequence: "MQIFVKTLTGKTITLEVEPSDTIENVKAKIQDKEGIPPDQQRLIFAGKQLEDGRTLSDYNIQKESTLHLVLRLRGG"
+
+anchor_chains:  [A]
+partner_chains: [B]
+
+# reviewed 2026-09-01 against data/annotation/example_toy/annotation.yaml
+# (Pfam PF00240 / SMART SM00213 / PROSITE PS50053 ubiquitin fold 1-72; the
+# LRGG tail is flexible but metapredict scores it ordered — kept as a short
+# disordered tag by hand for the plumbing demo).
+annotation_reviewed: true
+
+domains:
+  A:
+    - {name: ubiquitin_fold, start: 1,  end: 72, kind: domain}
+    - {name: LRGG_tail,      start: 73, end: 76, kind: disordered}
+  B:
+    - {name: ubiquitin_fold, start: 1,  end: 72, kind: domain}
+    - {name: LRGG_tail,      start: 73, end: 76, kind: disordered}
+
+plip_passes:
+  - {name: main, dnareceptor: false, fix_pdb: false, chains: "[['A'],['B']]"}
+
+plip_host:
+  docker_memory: "8g"
+  docker_platform: "linux/amd64"

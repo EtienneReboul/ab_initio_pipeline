@@ -1,0 +1,29 @@
+# =============================================================================
+# config.local.yaml — Personal / per-machine overrides (NOT tracked by git)
+# =============================================================================
+# 1. cp config.local.yaml.example config.local.yaml
+# 2. Uncomment/edit only what you need to override.
+# 3. Every workflows/*/Snakefile loads this on top of config.yaml automatically.
+# =============================================================================
+
+# ── Quick-test knobs ────────────────────────────────────────────────────────
+# af3:
+#   n_replicas: 2
+# abcfold:
+#   number_of_models: 1
+
+# ── Host tool paths ────────────────────────────────────────────────────────
+# chimerax_bin: "/Applications/ChimeraX.app/Contents/MacOS/ChimeraX"
+# plip_image: "docker.io/pharmai/plip:latest"
+
+# ── Annotation contact address (EBI InterProScan REST requires one) ────────
+# REQUIRED for stage 1's annotate_domains rule. Lives ONLY here, never in the
+# tracked config.yaml. Use an institutional address.
+annotate:
+  interproscan:
+    email: "etienne.reboul@cnrs.fr"
+
+# ── SLURM overrides for your IFB account ──────────────────────────────────
+# slurm:
+#   account: "your_account"
+#   exclude_nodes: ""

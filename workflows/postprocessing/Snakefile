@@ -1,0 +1,357 @@
+"""
+workflows/postprocessing/Snakefile — Stage 3 (local)
+==================================================
+Run after rsync-ing results/abcfold/ + results/metadata/ back from IFB.
+
+  align_anchor       rigid-core Kabsch on anchor_chains, partner trim, pose
+                     clustering (config cluster.method) -> pose_clusters.csv +
+                     aligned_partner_ca.npy + rmsf_profile.svg
+  compute_metrics    ipSAE / iLIS / Pinc over the FULL ensemble -> interface_metrics.parquet
+  select_top_n       checkpoint: top-N models/cluster -> selected/cluster_<k>/*.cif
+  minimize_cif       ChimeraX energy minimization (+ *_energy.csv trace)
+  fix_pdb            pdb4amber + PDBFixer  (per plip_pass.fix_pdb)
+  run_plip           Docker PLIP, once per plip_pass in configs/<system>.yaml
+  plip_to_csv        pliparser -> summary.csv
+  aggregate          -> all_selected_summary_<pass>.csv
+  + report figures (dim-reduction, PLIP heatmaps, minimize energy) and
+    reports/postprocessing.html (onsuccess)
+
+Usage:
+  snakemake -s workflows/postprocessing/Snakefile --use-conda --cores 4
+"""
+import sys
+from pathlib import Path
+
+REPO = Path(workflow.basedir).parent.parent
+sys.path.insert(0, str(REPO / "scripts"))
+from lib_pipeline import load_config, load_system  # noqa: E402
+
+configfile: str(REPO / "config.yaml")
+if (REPO / "config.local.yaml").exists():
+    configfile: str(REPO / "config.local.yaml")
+
+report: "../../report/postprocessing.rst"
+
+CFG = load_config(REPO)
+DIRS = CFG["dirs"]
+ABC = Path(DIRS["abcfold_out"])
+META = Path(DIRS["metadata"])
+POST = Path(DIRS["postproc"])
+REP = Path(DIRS["reports"]) / "postprocessing"
+LOG = Path(DIRS["logs"]) / "postprocessing"
+SYSTEMS = CFG["systems"]
+SPECS = {s: load_system(s, REPO) for s in SYSTEMS}
+ALG = CFG["align"]
+CL = CFG["cluster"]
+MET = CFG["metrics"]
+SEL = CFG["selection"]
+MZ = CFG["minimize"]
+RPT = CFG["report"]
+CHIMERAX = CFG["chimerax_bin"]
+PLIP_IMAGE = CFG["plip_image"]
+FMTS = ",".join(RPT["figure_formats"])
+
+
+def passes(system):
+    return {p["name"]: p for p in SPECS[system]["plip_passes"]}
+
+
+def _method_flags():
+    m = CL["method"]
+    f = f"--method {m} --max-k {CL['gmm']['max_k']}"
+    if m == "hdbscan":
+        f += f" --hdbscan-optuna-trials {CL['hdbscan']['optuna_trials']}"
+    return f
+
+
+rule all:
+    default_target: True
+    input:
+        [str(POST / s / "pose_clusters.csv") for s in SYSTEMS],
+        [str(POST / s / "interface_metrics.parquet") for s in SYSTEMS],
+        [str(POST / s / f"all_selected_summary_{p}.csv")
+         for s in SYSTEMS for p in passes(s)],
+        [str(REP / s / "dimreduction.svg") for s in SYSTEMS],
+        [str(REP / s / "minimize_energy.svg") for s in SYSTEMS],
+        [str(REP / s / f"plip_heatmaps_{p}.svg")
+         for s in SYSTEMS for p in passes(s)],
+
+
+# ── 3a. anchor alignment + pose clustering ───────────────────────────────
+rule align_anchor:
+    input:
+        metadata=str(META / "{system}" / "model_metadata.parquet"),
+        spec=str(REPO / "configs" / "{system}.yaml"),
+    output:
+        csv=str(POST / "{system}" / "pose_clusters.csv"),
+        npy=str(POST / "{system}" / "aligned_partner_ca.npy"),
+        rmsf=report(str(POST / "{system}" / "rmsf_profile.svg"),
+                    category="3. Postprocessing", subcategory="Rigid core / RMSF",
+                    labels={"system": "{system}"}),
+    log:
+        str(LOG / "align_anchor" / "{system}.log"),
+    conda:
+        "../../envs/align_cluster.yaml"
+    params:
+        alg=ALG, method=_method_flags(), out=lambda wc: str(POST / wc.system),
+    shell:
+        r"""
+        python scripts/pose_cluster_anchor.py \
+          --complex {wildcards.system} --complex-config {input.spec} \
+          --abcfold-output-root {ABC} --metadata-root {META} \
+          --out-root {params.out} \
+          --n-iter {params.alg[n_iter]} \
+          --core-rmsf-target {params.alg[core_rmsf_target]} \
+          --min-core-frac {params.alg[min_core_frac]} \
+          --partner-rmsf-target {params.alg[partner_rmsf_target]} \
+          --partner-min-frac {params.alg[partner_min_frac]} \
+          {params.method} > {log} 2>&1
+        """
+
+
+# ── 3b. interface metrics (full ensemble) ───────────────────────────────
+rule compute_metrics:
+    input:
+        metadata=str(META / "{system}" / "model_metadata.parquet"),
+        h5=str(META / "{system}" / "arrays.h5"),
+        spec=str(REPO / "configs" / "{system}.yaml"),
+    output:
+        parquet=str(POST / "{system}" / "interface_metrics.parquet"),
+    log:
+        str(LOG / "compute_metrics" / "{system}.log"),
+    conda:
+        "../../envs/metrics.yaml"
+    params:
+        enabled=",".join(MET["enabled"]),
+        pae=MET["pae_cutoff"], cb=MET["contact_cutoff_cb"], pairs=MET["pairs"],
+        anchors=lambda wc: ",".join(SPECS[wc.system]["anchor_chains"]),
+        partners=lambda wc: ",".join(SPECS[wc.system]["partner_chains"]),
+    shell:
+        r"""
+        python scripts/compute_interface_metrics.py \
+          --system {wildcards.system} \
+          --metadata-root {META} --abcfold-root {ABC} \
+          --out {output.parquet} \
+          --enabled {params.enabled} --pae-cutoff {params.pae} \
+          --contact-cutoff-cb {params.cb} --pairs {params.pairs} \
+          --anchor-chains {params.anchors} --partner-chains {params.partners} \
+          > {log} 2>&1
+        """
+
+
+# ── 3c. top-N per cluster (checkpoint) ─────────────────────────────────
+checkpoint select_top_n_per_cluster:
+    input:
+        pose_clusters=str(POST / "{system}" / "pose_clusters.csv"),
+    output:
+        selected_dir=directory(str(POST / "{system}" / "selected")),
+        csv=str(POST / "{system}" / "selected_models.csv"),
+    log:
+        str(LOG / "select" / "{system}.log"),
+    conda:
+        "../../envs/align_cluster.yaml"
+    params:
+        top_n=SEL["top_n"], rank_by=SEL["rank_by"],
+        out=lambda wc: str(POST / wc.system),
+    shell:
+        r"""
+        python scripts/select_top_n_per_cluster.py \
+          --pose-clusters {input.pose_clusters} \
+          --abcfold-output-root {ABC} --out-root {params.out} \
+          --top-n {params.top_n} --rank-by {params.rank_by} > {log} 2>&1
+        """
+
+
+def selected_targets(wildcards):
+    co = checkpoints.select_top_n_per_cluster.get(system=wildcards.system).output.selected_dir
+    wc = glob_wildcards(str(Path(co) / "cluster_{cluster}" / "{fname}.cif"))
+    return wc.cluster, wc.fname
+
+
+# ── 3d. minimize ──────────────────────────────────────────────────────
+rule minimize_cif:
+    input:
+        cif=str(POST / "{system}" / "selected" / "cluster_{cluster}" / "{fname}.cif"),
+    output:
+        pdb=str(POST / "{system}" / "minimized" / "{cluster}" / "{fname}" / "{fname}.pdb"),
+    params:
+        outdir=str(POST / "{system}" / "minimized" / "{cluster}" / "{fname}"),
+        chimerax=CHIMERAX,
+    log:
+        str(LOG / "{system}" / "{cluster}" / "{fname}_minimize.log"),
+    shell:
+        r"""
+        mkdir -p {params.outdir}
+        {params.chimerax} --nogui --script "scripts/minimize_cif.py {input.cif} {output.pdb}" > {log} 2>&1
+        """
+
+
+# ── 3e. fix_pdb (built only when a plip_pass with fix_pdb: true needs it) ─
+rule fix_pdb:
+    input:
+        pdb=str(POST / "{system}" / "minimized" / "{cluster}" / "{fname}" / "{fname}.pdb"),
+    output:
+        fixed=str(POST / "{system}" / "minimized" / "{cluster}" / "{fname}" / "{fname}_fixed.pdb"),
+    params:
+        amber=str(POST / "{system}" / "minimized" / "{cluster}" / "{fname}" / "{fname}_amber.pdb"),
+    conda:
+        "../../envs/fix_pdb.yaml"
+    log:
+        str(LOG / "{system}" / "{cluster}" / "{fname}_fix_pdb.log"),
+    shell:
+        r"""
+        set -euo pipefail
+        pdb4amber -i {input.pdb} -o {params.amber} --nohyd >> {log} 2>&1
+        python scripts/fix_pdb.py --input {params.amber} --output {output.fixed} >> {log} 2>&1
+        """
+
+
+def plip_pass_input(wildcards):
+    cfg = passes(wildcards.system)[wildcards.pass_name]
+    base = str(POST / wildcards.system / "minimized" / wildcards.cluster /
+               wildcards.fname / wildcards.fname)
+    return f"{base}_fixed.pdb" if cfg.get("fix_pdb") else f"{base}.pdb"
+
+
+# ── 3f. PLIP, once per plip_pass ─────────────────────────────────────
+rule run_plip:
+    input:
+        pdb=plip_pass_input,
+    output:
+        report=str(POST / "{system}" / "plip_{pass_name}" / "{cluster}" / "{fname}" /
+                   "{fname}_report" / "{fname}_report.txt"),
+    params:
+        image=PLIP_IMAGE,
+        docker_memory=lambda wc: SPECS[wc.system]["plip_host"].get("docker_memory", "8g"),
+        platform=lambda wc: (f"--platform {SPECS[wc.system]['plip_host']['docker_platform']}"
+                             if SPECS[wc.system]["plip_host"].get("docker_platform") else ""),
+        dnareceptor=lambda wc: "--dnareceptor" if passes(wc.system)[wc.pass_name].get("dnareceptor") else "",
+        chains=lambda wc: (f"--chains \"{passes(wc.system)[wc.pass_name]['chains']}\""
+                           if passes(wc.system)[wc.pass_name].get("chains") else ""),
+        outdir=str(POST / "{system}" / "plip_{pass_name}" / "{cluster}" / "{fname}" / "{fname}_report"),
+    log:
+        str(LOG / "{system}" / "{cluster}" / "{fname}_plip_{pass_name}.log"),
+    shell:
+        r"""
+        mkdir -p {params.outdir}
+        docker run --rm --memory={params.docker_memory} {params.platform} \
+          -v $(pwd):/work -w /work {params.image} \
+          -f {input.pdb} -t {params.dnareceptor} {params.chains} -o {params.outdir} > {log} 2>&1
+        actual="{params.outdir}/$(basename {input.pdb} .pdb)_report.txt"
+        [ "$actual" != "{output.report}" ] && mv "$actual" "{output.report}" || true
+        """
+
+
+rule plip_to_csv:
+    input:
+        report=str(POST / "{system}" / "plip_{pass_name}" / "{cluster}" / "{fname}" /
+                   "{fname}_report" / "{fname}_report.txt"),
+    output:
+        summary=str(POST / "{system}" / "plip_{pass_name}" / "{cluster}" / "{fname}" /
+                    "{fname}_report" / "csv" / "summary.csv"),
+    params:
+        outdir=str(POST / "{system}" / "plip_{pass_name}" / "{cluster}" / "{fname}" /
+                   "{fname}_report" / "csv"),
+    conda:
+        "../../envs/pliparser.yaml"
+    log:
+        str(LOG / "{system}" / "{cluster}" / "{fname}_pliparser_{pass_name}.log"),
+    shell:
+        r"""
+        mkdir -p {params.outdir}
+        pliparser plip2csv --input {input.report} --output {params.outdir}/ > {log} 2>&1
+        """
+
+
+def summaries_for(wildcards):
+    clusters, fnames = selected_targets(wildcards)
+    return [str(POST / wildcards.system / f"plip_{wildcards.pass_name}" / c / f /
+                f"{f}_report" / "csv" / "summary.csv")
+            for c, f in zip(clusters, fnames)]
+
+
+rule aggregate:
+    input:
+        csvs=summaries_for,
+    output:
+        str(POST / "{system}" / "all_selected_summary_{pass_name}.csv"),
+    conda:
+        "../../envs/aggregate.yaml"
+    log:
+        str(LOG / "{system}" / "aggregate_{pass_name}.log"),
+    shell:
+        r"""
+        python scripts/aggregate_summaries.py --output {output} {input.csvs} > {log} 2>&1
+        """
+
+
+# ── 3g. report figures ───────────────────────────────────────────────
+rule fig_dimreduction:
+    input:
+        npy=str(POST / "{system}" / "aligned_partner_ca.npy"),
+        pc=str(POST / "{system}" / "pose_clusters.csv"),
+        im=str(POST / "{system}" / "interface_metrics.parquet"),
+    output:
+        report(str(REP / "{system}" / "dimreduction.svg"),
+               category="3. Postprocessing", subcategory="Dimensionality reduction",
+               labels={"system": "{system}"}),
+    conda:
+        "../../envs/align_cluster.yaml"
+    params:
+        methods=",".join(CL["dimreduction"]), fmts=FMTS,
+    shell:
+        r"""
+        python scripts/plot_dimreduction.py --system {wildcards.system} \
+          --results-root {POST} --methods {params.methods} \
+          --out {output[0]} --formats {params.fmts}
+        """
+
+
+rule fig_minimize_energy:
+    input:
+        lambda wc: expand(
+            str(POST / wc.system / "minimized" / "{cf[0]}" / "{cf[1]}" / "{cf[1]}.pdb"),
+            cf=list(zip(*selected_targets(wc)))),
+    output:
+        svg=report(str(REP / "{system}" / "minimize_energy.svg"),
+                   category="3. Postprocessing", subcategory="Minimization energy",
+                   labels={"system": "{system}"}),
+        table=report(str(REP / "{system}" / "minimize_failure_rate.csv"),
+                     category="3. Postprocessing", subcategory="Minimization failure rate",
+                     labels={"system": "{system}"}),
+    conda:
+        "../../envs/report.yaml"
+    params:
+        maxe=MZ["max_abs_energy"], fmts=FMTS,
+    shell:
+        r"""
+        python scripts/plot_minimize_energy.py --system {wildcards.system} \
+          --results-root {POST} --max-abs-energy {params.maxe} \
+          --out {output.svg} --out-table {output.table} --formats {params.fmts}
+        """
+
+
+rule fig_plip_heatmaps:
+    input:
+        summary=str(POST / "{system}" / "all_selected_summary_{pass_name}.csv"),
+        pc=str(POST / "{system}" / "pose_clusters.csv"),
+        spec=str(REPO / "configs" / "{system}.yaml"),
+    output:
+        report(str(REP / "{system}" / "plip_heatmaps_{pass_name}.svg"),
+               category="3. Postprocessing", subcategory="PLIP heatmaps",
+               labels={"system": "{system}", "pass": "{pass_name}"}),
+    conda:
+        "../../envs/report.yaml"
+    params:
+        strata=",".join(RPT["plip_heatmaps"]["strata"]), fmts=FMTS,
+    shell:
+        r"""
+        python scripts/plot_plip_heatmaps.py --system {wildcards.system} \
+          --spec {input.spec} --summary {input.summary} \
+          --pose-clusters {input.pc} --strata {params.strata} \
+          --out {output[0]} --formats {params.fmts}
+        """
+
+
+onsuccess:
+    shell(f"bash {REPO}/scripts/build_report.sh postprocessing {REPO}")

@@ -1,0 +1,17 @@
+name: ab-initio-morf
+# MoRFchibi 2.0 (tools/MC2) — CPU-only pytorch build. Adapted from
+# tools/MC2/mc2.yml (upstream) to conda-forge + a pinned python so
+# Snakemake --use-conda can build it reproducibly.
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.11
+  - pytorch>=2.1
+  - cpuonly
+  - numpy>=1.26
+  - pandas>=2.0
+  - pip
+  - pip:
+      - crc64iso
+      - biopython

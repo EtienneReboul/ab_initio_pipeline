@@ -1,0 +1,21 @@
+name: ab-initio-align-cluster
+# Stage 3a/3c — anchor rigid-core Kabsch alignment (pose_cluster_anchor.py)
+# and pose clustering (cluster_poses.py): HDBSCAN + Optuna/DBCV or GMM/BIC,
+# plus the dimensionality-reduction panels for the report.
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.11
+  - gemmi>=0.7
+  - numpy>=1.26
+  - scipy>=1.11
+  - scikit-learn>=1.4
+  - pandas>=2.0
+  - pyarrow>=15.0
+  - matplotlib>=3.8
+  - hdbscan>=0.8
+  - optuna>=3.6
+  - umap-learn>=0.5
+  - kneed>=0.8
+  - pyyaml>=6.0

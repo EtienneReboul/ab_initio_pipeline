@@ -1,0 +1,235 @@
+"""
+workflows/processing/Snakefile — Stage 2 (IFB login node, SLURM executor plugin)
+==============================================================================
+Replaces the DRB2 pipeline's submit_abcfold.sh. One SLURM job per system,
+launched by snakemake-executor-plugin-slurm; per-system resources come from
+config.yaml's slurm.size_classes[<size_class>].
+
+  prime_backends    opt-in (`--until prime_backends`, on a login node, once):
+                    abcfold --dry_run --override installs every selected
+                    backend's micromamba env + weights. Needs internet.
+  run_abcfold       one job / system: abcfold -<models> ... --override
+  compress_metadata compress_abcfold_metadata.py --delete-originals
+  merge_metadata    -> results/metadata/all_models.parquet
+  collect_run_stats -> reports/processing/{timings,compression}.csv
+  fig_backend_yield -> per-backend model-count bar
+  reports/processing.html  (onsuccess hook)
+
+Usage (IFB login node, after rsync-ing data/fold_inputs/):
+  snakemake -s workflows/processing/Snakefile \
+      --profile workflows/processing/profiles/ifb --until prime_backends
+  snakemake -s workflows/processing/Snakefile \
+      --profile workflows/processing/profiles/ifb
+"""
+import sys
+from pathlib import Path
+
+from snakemake.exceptions import WorkflowError
+
+REPO = Path(workflow.basedir).parent.parent
+sys.path.insert(0, str(REPO / "scripts"))
+from lib_pipeline import load_config, load_system  # noqa: E402
+
+configfile: str(REPO / "config.yaml")
+if (REPO / "config.local.yaml").exists():
+    configfile: str(REPO / "config.local.yaml")
+
+report: "../../report/processing.rst"
+
+CFG = load_config(REPO)
+DIRS = CFG["dirs"]
+FOLD = Path(DIRS["fold_inputs"])
+ABC = Path(DIRS["abcfold_out"])
+META = Path(DIRS["metadata"])
+REP = Path(DIRS["reports"]) / "processing"
+LOG = Path(DIRS["logs"]) / "processing"
+SYSTEMS = CFG["systems"]
+SPECS = {s: load_system(s, REPO) for s in SYSTEMS}
+SL = CFG["slurm"]
+ABCFG = CFG["abcfold"]
+
+MODEL_FLAG = "-" + "".join(
+    {"alphafold3": "a", "boltz": "b", "chai1": "c",
+     "openfold3": "o", "protenix": "p", "rosettafold3": "r"}[m]
+    for m, on in ABCFG["models"].items() if on
+)
+
+# ── annotation-review gate ──────────────────────────────────────────────────
+_unreviewed = [s for s in SYSTEMS if not SPECS[s].get("annotation_reviewed")]
+if _unreviewed and not config.get("skip_annotation_gate"):
+    raise WorkflowError(
+        f"Systems with `annotation_reviewed: false`: {_unreviewed}\n"
+        "Review data/annotation/<system>/annotation.yaml, curate the `domains:` "
+        "block into configs/<system>.yaml, set `annotation_reviewed: true`, then "
+        "re-run (or --config skip_annotation_gate=true to override)."
+    )
+
+
+# ── per-system SLURM resource resolver (read by the slurm executor plugin) ──
+def _sc(system):
+    return SL["size_classes"][SPECS[system]["size_class"]]
+
+def res_partition(wildcards):
+    return SL["partition"]
+
+def res_runtime(wildcards):
+    return int(_sc(wildcards.system)["runtime"])
+
+def res_mem_mb(wildcards):
+    return int(str(_sc(wildcards.system)["mem"]).rstrip("Gg")) * 1024
+
+def res_slurm_extra(wildcards):
+    sc = _sc(wildcards.system)
+    parts = [f"--gres={sc['gres']}"]
+    if SL.get("exclude_nodes"):
+        parts.append(f"--exclude={SL['exclude_nodes']}")
+    if SL.get("account"):
+        parts.append(f"--account={SL['account']}")
+    return " ".join(parts)
+
+
+rule all:
+    default_target: True
+    input:
+        str(META / "all_models.parquet"),
+        str(REP / "timings.csv"),
+        str(REP / "compression.csv"),
+        str(REP / "backend_yield.svg"),
+
+
+rule prime_backends:
+    input:
+        any_json=str(FOLD / SYSTEMS[0] / "fold_input.resolved.json"),
+    output:
+        touch(str(ABC / "_prime.done")),
+    log:
+        str(LOG / "prime.log"),
+    params:
+        model_params=ABCFG["model_params"],
+        af3_ver=ABCFG["af3_module_version"],
+        cuda_ver=SL["cuda_module_version"],
+        model_flag=MODEL_FLAG,
+        out=str(ABC / "_prime"),
+    shell:
+        r"""
+        export AF3_MODULE_VERSION={params.af3_ver} CUDA_MODULE_VERSION={params.cuda_ver}
+        source {REPO}/scripts/abcfold_cluster_env.sh
+        "$ABCFOLD_BIN" {input.any_json} {params.out} {params.model_flag} \
+          --model_params {params.model_params} \
+          $( [ -n "$AF3_SIF_PATH" ] && echo "--af3_sif_path $AF3_SIF_PATH" ) \
+          --dry_run --override > {log} 2>&1
+        """
+
+
+rule run_abcfold:
+    input:
+        resolved=str(FOLD / "{system}" / "fold_input.resolved.json"),
+    output:
+        done=str(ABC / "{system}" / "prediction.done"),
+    log:
+        str(LOG / "run_abcfold" / "{system}.log"),
+    resources:
+        slurm_partition=res_partition,
+        runtime=res_runtime,
+        mem_mb=res_mem_mb,
+        cpus_per_task=SL["cpus"],
+        slurm_extra=res_slurm_extra,
+    params:
+        model_params=ABCFG["model_params"],
+        af3_ver=ABCFG["af3_module_version"],
+        cuda_ver=SL["cuda_module_version"],
+        model_flag=MODEL_FLAG,
+        n_models=ABCFG["number_of_models"],
+        n_recycles=ABCFG["num_recycles"],
+        out=lambda wc: str(ABC / wc.system),
+    shell:
+        r"""
+        export AF3_MODULE_VERSION={params.af3_ver} CUDA_MODULE_VERSION={params.cuda_ver}
+        source {REPO}/scripts/abcfold_cluster_env.sh
+        echo "[run_abcfold] {wildcards.system} {params.model_flag}"
+        "$ABCFOLD_BIN" {input.resolved} {params.out} {params.model_flag} \
+          --model_params {params.model_params} \
+          $( [ -n "$AF3_SIF_PATH" ] && echo "--af3_sif_path $AF3_SIF_PATH" ) \
+          --number_of_models {params.n_models} \
+          --num_recycles {params.n_recycles} \
+          --no_server --no_visuals --override > {log} 2>&1
+        echo "$(date): prediction finished" > {output.done}
+        """
+
+
+rule compress_metadata:
+    input:
+        done=str(ABC / "{system}" / "prediction.done"),
+    output:
+        parquet=str(META / "{system}" / "model_metadata.parquet"),
+        h5=str(META / "{system}" / "arrays.h5"),
+    log:
+        str(LOG / "compress" / "{system}.log"),
+    conda:
+        "../../envs/metadata_compress.yaml"
+    shell:
+        r"""
+        python scripts/compress_abcfold_metadata.py \
+          --protein {wildcards.system} \
+          --abcfold-output-root {ABC} --out-root {META} \
+          --delete-originals --skip-merge > {log} 2>&1
+        """
+
+
+rule merge_metadata:
+    input:
+        [str(META / s / "model_metadata.parquet") for s in SYSTEMS],
+    output:
+        str(META / "all_models.parquet"),
+    log:
+        str(LOG / "merge_metadata.log"),
+    conda:
+        "../../envs/metadata_compress.yaml"
+    shell:
+        r"""
+        python -c "import sys; sys.path.insert(0,'scripts'); from pathlib import Path; \
+from compress_abcfold_metadata import merge_all; merge_all(Path('{META}'))" > {log} 2>&1
+        """
+
+
+rule collect_run_stats:
+    input:
+        [str(ABC / s / "prediction.done") for s in SYSTEMS],
+        [str(META / s / "model_metadata.parquet") for s in SYSTEMS],
+    output:
+        timings=report(str(REP / "timings.csv"), category="2. Processing",
+                       subcategory="Run timing"),
+        compression=report(str(REP / "compression.csv"), category="2. Processing",
+                           subcategory="Metadata compression"),
+    conda:
+        "../../envs/report.yaml"
+    params:
+        systems=" ".join(SYSTEMS),
+    shell:
+        r"""
+        python scripts/collect_run_stats.py --systems {params.systems} \
+          --abcfold-root {ABC} --metadata-root {META} \
+          --timings {output.timings} --compression {output.compression}
+        """
+
+
+rule fig_backend_yield:
+    input:
+        [str(META / s / "model_metadata.parquet") for s in SYSTEMS],
+    output:
+        report(str(REP / "backend_yield.svg"), category="2. Processing",
+               subcategory="Per-backend model yield"),
+    conda:
+        "../../envs/report.yaml"
+    params:
+        systems=" ".join(SYSTEMS),
+        fmts=",".join(CFG["report"]["figure_formats"]),
+    shell:
+        r"""
+        python scripts/plot_backend_yield.py --systems {params.systems} \
+          --metadata-root {META} --out {output[0]} --formats {params.fmts}
+        """
+
+
+onsuccess:
+    shell(f"bash {REPO}/scripts/build_report.sh processing {REPO}")

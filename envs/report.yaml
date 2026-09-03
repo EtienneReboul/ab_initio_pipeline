@@ -1,0 +1,17 @@
+name: ab-initio-report
+# Report figure/table rules for all 3 stages — MSA coverage, domain bars,
+# disorder curves, per-backend yield, minimize energy traces, dim-reduction
+# panels, PLIP heatmaps. datavzrd itself is in envs/controller.yaml (the
+# onsuccess hook runs it); this env is for the matplotlib/seaborn figures.
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.11
+  - numpy>=1.26
+  - pandas>=2.0
+  - pyarrow>=15.0
+  - matplotlib>=3.8
+  - seaborn>=0.13
+  - scikit-learn>=1.4
+  - pyyaml>=6.0

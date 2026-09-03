@@ -1,0 +1,302 @@
+"""
+workflows/preprocessing/Snakefile — Stage 1 (local, needs internet)
+===================================================================
+Prepares everything ABCfold needs, plus sequence annotation.
+
+  1a. prepare_fold_input   fold_input.json per system (AF3-dialect, every seed)
+  1b. fetch_mmseqs2_msa    MSA + top-hit templates from the ColabFold MMseqs2
+                            webserver, embedded -> fold_input.resolved.json
+  1c. annotate_domains     ScanProsite + InterProScan REST -> domains.raw.tsv
+      annotate_disorder    IUPred3 (long/short) + ANCHOR2 + AIUPred -> disorder.tsv
+      annotate_morf        MoRFchibi2 (tools/MC2) -> morf.tsv
+      merge_annotation     -> data/annotation/<sys>/annotation.yaml  (HUMAN REVIEW)
+  1d. abcfold_input_stats  chains / residues / tokens / MSA depth / token-cap risk
+  1e. report figures/tables + reports/preprocessing.html  (built by onsuccess)
+
+Usage:
+  snakemake -s workflows/preprocessing/Snakefile --use-conda --cores 2
+"""
+import sys
+from pathlib import Path
+
+REPO = Path(workflow.basedir).parent.parent
+sys.path.insert(0, str(REPO / "scripts"))
+from lib_pipeline import load_config, load_system, protein_chains  # noqa: E402
+
+configfile: str(REPO / "config.yaml")
+if (REPO / "config.local.yaml").exists():
+    configfile: str(REPO / "config.local.yaml")
+
+report: "../../report/preprocessing.rst"
+
+CFG = load_config(REPO)
+DIRS = CFG["dirs"]
+FOLD = Path(DIRS["fold_inputs"])
+ANN = Path(DIRS["annotation"])
+REP = Path(DIRS["reports"]) / "preprocessing"
+LOG = Path(DIRS["logs"]) / "preprocessing"
+SYSTEMS = CFG["systems"]
+
+SPECS = {s: load_system(s, REPO) for s in SYSTEMS}
+PROT_IDS = {s: [c["id"] for c in protein_chains(SPECS[s])] for s in SYSTEMS}
+
+
+def prot_figs(kind):
+    return [str(REP / s / f"{kind}_{cid}.svg")
+            for s in SYSTEMS for cid in PROT_IDS[s]]
+
+
+rule all:
+    default_target: True
+    input:
+        [str(FOLD / s / "fold_input.resolved.json") for s in SYSTEMS],
+        [str(ANN / s / "annotation.yaml") for s in SYSTEMS],
+        [str(ANN / s / "input_stats.tsv") for s in SYSTEMS],
+        prot_figs("msa_coverage"),
+        prot_figs("domain_bar"),
+        prot_figs("disorder"),
+        [str(REP / s / "templates.csv") for s in SYSTEMS],
+        [str(REP / s / "input_stats.csv") for s in SYSTEMS],
+
+
+# ── 1a. fold_input.json ────────────────────────────────────────────────────
+rule prepare_fold_input:
+    input:
+        spec=str(REPO / "configs" / "{system}.yaml"),
+    output:
+        json=str(FOLD / "{system}" / "fold_input.json"),
+    log:
+        str(LOG / "fold_input" / "{system}.log"),
+    conda:
+        "../../envs/preprocessing.yaml"
+    params:
+        af3=CFG["af3"],
+    shell:
+        r"""
+        python scripts/make_multimer_af3_input.py \
+          --complex-config {input.spec} \
+          --output {output.json} \
+          --n-replicas {params.af3[n_replicas]} \
+          --seed-strategy {params.af3[seed_strategy]} \
+          --seed-base {params.af3[seed_base]} \
+          --random-master-seed {params.af3[random_master_seed]} \
+          --dialect {params.af3[dialect]} \
+          --json-version {params.af3[json_version]} \
+          > {log} 2>&1
+        """
+
+
+# ── 1b. MMseqs2 MSA + templates ───────────────────────────────────────────
+rule fetch_mmseqs2_msa:
+    input:
+        json=str(FOLD / "{system}" / "fold_input.json"),
+    output:
+        resolved=str(FOLD / "{system}" / "fold_input.resolved.json"),
+    log:
+        str(LOG / "mmseqs2" / "{system}.log"),
+    conda:
+        "../../envs/preprocessing.yaml"
+    params:
+        m=CFG["mmseqs2"],
+    shell:
+        r"""
+        python scripts/fetch_mmseqs2_msa.py \
+          --input-json {input.json} \
+          --output-json {output.resolved} \
+          --num-templates {params.m[num_templates]} \
+          --retries {params.m[retries]} \
+          --delay {params.m[delay]} \
+          > {log} 2>&1
+        """
+
+
+# ── 1c. annotation ───────────────────────────────────────────────────────
+rule annotate_domains:
+    input:
+        spec=str(REPO / "configs" / "{system}.yaml"),
+    output:
+        tsv=str(ANN / "{system}" / "domains.raw.tsv"),
+    log:
+        str(LOG / "annotate_domains" / "{system}.log"),
+    conda:
+        "../../envs/annotate.yaml"
+    shell:
+        r"""
+        python scripts/annotate_domains.py \
+          --system {wildcards.system} --spec {input.spec} --out {output.tsv} \
+          > {log} 2>&1
+        """
+
+
+rule annotate_disorder:
+    input:
+        spec=str(REPO / "configs" / "{system}.yaml"),
+    output:
+        tsv=str(ANN / "{system}" / "disorder.tsv"),
+    log:
+        str(LOG / "annotate_disorder" / "{system}.log"),
+    conda:
+        "../../envs/annotate.yaml"
+    shell:
+        r"""
+        python scripts/annotate_disorder.py \
+          --system {wildcards.system} --spec {input.spec} --out {output.tsv} \
+          > {log} 2>&1
+        """
+
+
+rule annotate_morf:
+    input:
+        spec=str(REPO / "configs" / "{system}.yaml"),
+    output:
+        tsv=str(ANN / "{system}" / "morf.tsv"),
+    log:
+        str(LOG / "annotate_morf" / "{system}.log"),
+    conda:
+        "../../envs/morf.yaml"
+    params:
+        thr=CFG["annotate"]["morfchibi"]["score_threshold"],
+        minlen=CFG["annotate"]["morfchibi"]["min_len"],
+    shell:
+        r"""
+        python scripts/annotate_morf.py \
+          --system {wildcards.system} --spec {input.spec} --out {output.tsv} \
+          --score-threshold {params.thr} --min-len {params.minlen} \
+          > {log} 2>&1
+        """
+
+
+rule merge_annotation:
+    input:
+        spec=str(REPO / "configs" / "{system}.yaml"),
+        domains=str(ANN / "{system}" / "domains.raw.tsv"),
+        disorder=str(ANN / "{system}" / "disorder.tsv"),
+        morf=str(ANN / "{system}" / "morf.tsv"),
+    output:
+        yaml=str(ANN / "{system}" / "annotation.yaml"),
+    log:
+        str(LOG / "merge_annotation" / "{system}.log"),
+    conda:
+        "../../envs/annotate.yaml"
+    shell:
+        r"""
+        python scripts/merge_annotation.py \
+          --system {wildcards.system} --spec {input.spec} \
+          --domains {input.domains} --disorder {input.disorder} --morf {input.morf} \
+          --out {output.yaml} \
+          > {log} 2>&1
+        """
+
+
+# ── 1d. input stats ────────────────────────────────────────────────────
+rule abcfold_input_stats:
+    input:
+        spec=str(REPO / "configs" / "{system}.yaml"),
+        resolved=str(FOLD / "{system}" / "fold_input.resolved.json"),
+    output:
+        tsv=str(ANN / "{system}" / "input_stats.tsv"),
+    log:
+        str(LOG / "input_stats" / "{system}.log"),
+    conda:
+        "../../envs/annotate.yaml"
+    params:
+        models=CFG["abcfold"]["models"],
+    shell:
+        r"""
+        python scripts/abcfold_input_stats.py \
+          --system {wildcards.system} --spec {input.spec} \
+          --resolved {input.resolved} --out {output.tsv} \
+          > {log} 2>&1
+        """
+
+
+# ── 1e. report figures/tables ─────────────────────────────────────────
+rule fig_msa_coverage:
+    input:
+        resolved=str(FOLD / "{system}" / "fold_input.resolved.json"),
+    output:
+        report(str(REP / "{system}" / "msa_coverage_{chain}.svg"),
+               category="1. Preprocessing", subcategory="MSA coverage",
+               labels={"system": "{system}", "chain": "{chain}"}),
+    conda:
+        "../../envs/report.yaml"
+    params:
+        fmts=",".join(CFG["report"]["figure_formats"]),
+    shell:
+        r"""
+        python scripts/plot_msa_coverage.py \
+          --resolved {input.resolved} --chain {wildcards.chain} \
+          --out {output[0]} --formats {params.fmts}
+        """
+
+
+rule fig_domain_bar:
+    input:
+        spec=str(REPO / "configs" / "{system}.yaml"),
+        annotation=str(ANN / "{system}" / "annotation.yaml"),
+    output:
+        report(str(REP / "{system}" / "domain_bar_{chain}.svg"),
+               category="1. Preprocessing", subcategory="Domain map",
+               labels={"system": "{system}", "chain": "{chain}"}),
+    conda:
+        "../../envs/report.yaml"
+    params:
+        fmts=",".join(CFG["report"]["figure_formats"]),
+    shell:
+        r"""
+        python scripts/plot_domain_bar.py \
+          --spec {input.spec} --annotation {input.annotation} --chain {wildcards.chain} \
+          --out {output[0]} --formats {params.fmts}
+        """
+
+
+rule fig_disorder:
+    input:
+        disorder=str(ANN / "{system}" / "disorder.tsv"),
+        morf=str(ANN / "{system}" / "morf.tsv"),
+    output:
+        report(str(REP / "{system}" / "disorder_{chain}.svg"),
+               category="1. Preprocessing", subcategory="Disorder / MoRF",
+               labels={"system": "{system}", "chain": "{chain}"}),
+    conda:
+        "../../envs/report.yaml"
+    params:
+        fmts=",".join(CFG["report"]["figure_formats"]),
+        cutoff=CFG["annotate"]["consensus"]["disorder_cutoff"],
+    shell:
+        r"""
+        python scripts/plot_disorder.py \
+          --disorder {input.disorder} --morf {input.morf} --chain {wildcards.chain} \
+          --cutoff {params.cutoff} --out {output[0]} --formats {params.fmts}
+        """
+
+
+rule table_templates:
+    input:
+        resolved=str(FOLD / "{system}" / "fold_input.resolved.json"),
+    output:
+        report(str(REP / "{system}" / "templates.csv"),
+               category="1. Preprocessing", subcategory="Template hits",
+               labels={"system": "{system}"}),
+    conda:
+        "../../envs/annotate.yaml"
+    shell:
+        r"""
+        python scripts/abcfold_input_stats.py --templates-table \
+          --system {wildcards.system} --resolved {input.resolved} --out {output[0]}
+        """
+
+
+rule table_input_stats:
+    input:
+        tsv=str(ANN / "{system}" / "input_stats.tsv"),
+    output:
+        report(str(REP / "{system}" / "input_stats.csv"),
+               category="1. Preprocessing", subcategory="Input stats",
+               labels={"system": "{system}"}),
+    shell:
+        "cp {input.tsv} {output[0]}"
+
+
+onsuccess:
+    shell(f"bash {REPO}/scripts/build_report.sh preprocessing {REPO}")

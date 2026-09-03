@@ -1,0 +1,180 @@
+# =============================================================================
+# ab_initio_pipeline — Master Configuration (shared defaults, all 3 stages)
+# =============================================================================
+# Generalised template distilled from three sibling ABCfold pipelines
+# (NPF transporters, DRB2/DCL4/dsRNA, AGO1/FBW2/miR). A new dataset should
+# need edits ONLY to:
+#   1. this file's `systems:` list (one line per system), and
+#   2. a new configs/<system>.yaml chain spec (see configs/_schema.md).
+# No script edits. Per-machine / per-user paths go in config.local.yaml
+# (copy config.local.yaml.example), which every Snakefile loads on top of
+# this one when present.
+#
+# Stages:
+#   1. preprocessing  (local, needs internet) — fold_input.json + MMseqs2
+#      MSA/templates + sequence annotation (domains / disorder / MoRF)
+#   2. processing     (IFB login node, Snakemake + slurm executor plugin) —
+#      ABCfold runs 6 backends together, then metadata compression
+#   3. postprocessing (local) — anchor alignment, interface metrics, pose
+#      clustering, model selection, minimize, PLIP, aggregation
+# Each stage writes one self-contained HTML report (reports/<stage>.html).
+# =============================================================================
+
+# ── Systems to run ───────────────────────────────────────────────────────────
+# One configs/<name>.yaml per entry. Comment/uncomment to scope a run.
+systems:
+  - example_toy
+  # - drb2_drb4
+  # - rna_ds_drb2_drb4
+  # - rna_ds_dcl4_drb2_drb4
+  # - ago1_fbw2
+  # - ago1_fbw2_mir165a
+
+# ── Stage 1a: fold_input.json (AlphaFold3-dialect, consumed by ABCfold) ──────
+af3:
+  dialect: "alphafold3"        # fold_input.json JSON dialect (ABCfold expects this key name)
+  json_version: 1
+  n_replicas: 20               # independent seeds per system (modelSeeds entries)
+  seed_strategy: "sequential"  # "sequential" | "random"
+  seed_base: 1
+  random_master_seed: 0        # only used when seed_strategy: random
+
+# ── Stage 1b: MMseqs2 "default run" — MSA + templates from the ColabFold ─────
+# webserver, via ABCfold's own `mmseqs2msa` CLI. Once per system.
+mmseqs2:
+  num_templates: 20
+  delay: 8                     # seconds between per-system webserver calls (politeness)
+  retries: 3
+  save_raw: true               # keep the raw a3m + template-hit table for the stage-1 report
+
+# ── Stage 1c: sequence annotation (domains / disorder / MoRF) ────────────────
+# All run on the Mac in stage 1. Results are written to
+# data/annotation/<system>/ and a proposed merge into configs/<system>.yaml
+# is left at data/annotation/<system>/annotation.yaml for HUMAN REVIEW.
+# Downstream stages read the hand-curated `domains:` block in
+# configs/<system>.yaml, never the raw annotation directly.
+annotate:
+  prosite:
+    scan_url: "https://prosite.expasy.org/cgi-bin/prosite/PSScan.cgi"
+    skip_profiles: false       # false = include PROSITE profiles (PS50xxx), not just patterns
+  interproscan:
+    email: ""                       # REQUIRED: set in config.local.yaml (EBI REST needs a
+                                     # contact address). Never commit a real address here.
+    base_url: "https://www.ebi.ac.uk/Tools/services/rest/iprscan5"
+    poll_s: 30
+    # valid names: GET {base_url}/parameterdetails/appl — bad names auto-fall
+    # back to the server default set (see scripts/annotate_domains.py).
+    applications: ["PfamA", "SMART", "PrositeProfiles", "Gene3d", "MobiDBLite"]
+  metapredict:
+    enabled: true              # metapredict v3 (pip) — the always-on disorder track
+  iupred3:
+    # IUPred3 + ANCHOR2 are academic-download gated (not on PyPI). OPTIONAL:
+    # drop the downloaded package under tools/iupred3/ and these tracks are
+    # added automatically; absent, the stage still completes on metapredict.
+    types: ["long", "short"]
+  anchor2:
+    enabled: true
+  aiupred:
+    # Also gated (aiupred.elte.hu). OPTIONAL: tools/aiupred/. The public REST
+    # endpoint returns 403, so there is no web fallback.
+    enabled: false
+  morfchibi:
+    score_threshold: 0.725     # MoRFchibi2 probability cutoff for calling a MoRF residue
+    min_len: 5                 # minimum contiguous MoRF segment length (residues)
+  consensus:
+    disorder_min_tracks: 2     # residue flagged "disordered" if >= this many tracks agree
+    disorder_cutoff: 0.5
+
+# ── Stage 2: ABCfold run ────────────────────────────────────────────────────
+abcfold:
+  models:
+    alphafold3: true           # -a
+    boltz: true                # -b
+    chai1: true                # -c
+    openfold3: true            # -o
+    protenix: true             # -p
+    rosettafold3: true         # -r
+  model_params: "/shared/bank/alphafold3/current"   # AF3 weights dir (IFB)
+  af3_module_version: "3.0.2"  # version component of IFB's alphafold module/wrapper path
+  af3_sif_path: ""             # override only — empty = auto-discover (abcfold_cluster_env.sh)
+  number_of_models: 5          # ABCfold --number_of_models (diffusion samples / seed)
+  num_recycles: 10             # AF3 recycles (ignored by OpenFold3, per ABCfold README)
+
+# ── Stage 2: SLURM (snakemake-executor-plugin-slurm, run from IFB login node) ─
+# Per-rule resources are selected by each system's `size_class:` key.
+slurm:
+  account: "npf_abinitio"
+  partition: "gpu"
+  cpus: 8
+  cuda_module_version: "12.9.1"          # IFB cuda-toolkit module — Protenix needs CUDA_HOME
+  exclude_nodes: "gpu-node-7,gpu-node-9" # confirmed infra issues (empty string to stop excluding)
+  metadata_env: "metadata-compress"     # conda env for compress_abcfold_metadata.py on the cluster
+  size_classes:
+    small:                              # <= ~1000 tokens — all 6 backends fit
+      gres: "gpu:l40s:1"
+      mem: "80G"
+      runtime: 600                      # minutes
+    large:                              # ~2000-2700 tokens — Chai-1/Protenix/Boltz likely fail on token caps
+      gres: "gpu:h200:1"
+      mem: "250G"
+      runtime: 2880
+
+# ── Stage 3a: anchor alignment (rigid-core Kabsch, one refinement per anchor) ─
+align:
+  n_iter: 8                    # rigid-core refinement iterations
+  core_rmsf_target: 1.5        # Angstrom — stop refining once median core RMSF is below this
+  min_core_frac: 0.4          # floor on core size as a fraction of the anchor chain's length
+  partner_rmsf_target: 5.0    # Angstrom — partner Ca above this (after anchor-frame align) are
+                               # dropped from the pose feature vector (disordered/linker stretches
+                               # move independently of the folded docking domain)
+  partner_min_frac: 0.4       # floor on kept partner Ca as a fraction of partner length
+
+# ── Stage 3b: interface metrics (PAE-based, over the FULL ABCfold ensemble) ──
+metrics:
+  enabled: ["ipsae", "ilis", "pinc"]   # tools/ipsae, tools/afm_lis, tools/pinc
+  pae_cutoff: 12.0            # Angstrom — LIS / ipSAE interaction-region PAE ceiling
+  contact_cutoff_cb: 8.0     # Angstrom — Cb-Cb direct-contact cutoff (cLIS / iLIS)
+  pairs: "anchor_partner"    # "anchor_partner" (each anchor x each partner) | "all" (every chain pair)
+
+# ── Stage 3c: pose clustering ───────────────────────────────────────────────
+cluster:
+  method: "hdbscan"           # "hdbscan" (Optuna/DBCV auto-tuned) | "gmm" (BIC-knee)
+  hdbscan:
+    optuna_trials: 60
+    dbcv_metric: "euclidean"
+  gmm:
+    max_k: 12
+    bic_knee: true
+  dimreduction: ["pca", "umap", "tsne", "mds"]   # panels rendered in the stage-3 report
+
+# ── Stage 3d: top-N-per-cluster selection ──────────────────────────────────
+selection:
+  top_n: 100000               # effectively "all" — .head(top_n) caps at the cluster's real size
+  rank_by: "ranking_score"    # backend's own ranking score; falls back to iptm when missing
+
+# ── Stage 3e: ChimeraX minimization (early-stop guard for numeric blow-up) ──
+minimize:
+  max_abs_energy: 1.0e15      # |energy| kJ/mol above this = diverged, stop and flag
+  divergence_factor: 100.0    # energy rising by more than this x its running min = diverged
+  max_steps: 1000
+
+# ── Stage 3f: reports ──────────────────────────────────────────────────────
+report:
+  figure_formats: ["svg", "pdf"]   # NEVER png/jpeg
+  datavzrd: true                    # tabular report items rendered via the datavzrd wrapper
+  plip_heatmaps:
+    strata: ["backend", "cluster", "total"]
+
+# ── Output directories ─────────────────────────────────────────────────────
+dirs:
+  fold_inputs: "data/fold_inputs"
+  annotation:  "data/annotation"
+  abcfold_out: "results/abcfold"
+  metadata:    "results/metadata"
+  postproc:    "results"        # per-system results live at results/<system>/
+  reports:     "reports"
+  logs:        "logs"
+
+# ── Host-specific tool paths (override in config.local.yaml) ────────────────
+chimerax_bin: "/Applications/ChimeraX-1.12.app/Contents/MacOS/ChimeraX"
+plip_image: "docker.io/pharmai/plip:latest"

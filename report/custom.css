@@ -1,0 +1,7 @@
+/* ab_initio_pipeline — Snakemake report stylesheet.
+   Keep it light: the default Snakemake report theme is fine, this just
+   tightens headings and widens the figure column for the wide SVGs. */
+:root { --accent: #4c72b0; }
+h1, h2, h3 { font-weight: 600; }
+.results img, .results svg { max-width: 100%; height: auto; }
+table { font-size: 0.85rem; }

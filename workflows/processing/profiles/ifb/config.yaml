@@ -1,0 +1,40 @@
+# Snakemake profile for Stage 2 on the IFB Core Cluster.
+# Run from a login node:  snakemake -s workflows/processing/Snakefile --profile workflows/processing/profiles/ifb
+#
+# Per-system slurm_partition / runtime / mem_mb / cpus_per_task / slurm_extra
+# (--gres, --exclude, --account) are set on the run_abcfold rule itself, from
+# config.yaml's slurm.size_classes[<size_class>]. This file only holds the
+# executor + global limits.
+executor: slurm
+use-conda: true
+conda-frontend: mamba
+jobs: 8                       # max concurrent SLURM jobs submitted
+latency-wait: 90             # NFS visibility lag for job outputs
+retries: 1
+printshellcmds: true
+rerun-incomplete: true
+
+default-resources:
+  slurm_partition: "gpu"
+  runtime: 600                # minutes — overridden per-system by run_abcfold
+  mem_mb: 80000
+  cpus_per_task: 8
+
+# compress_metadata / merge_metadata / report rules are light: keep them tiny.
+set-resources:
+  compress_metadata:
+    runtime: 120
+    mem_mb: 16000
+    cpus_per_task: 2
+  merge_metadata:
+    runtime: 30
+    mem_mb: 8000
+    cpus_per_task: 1
+  collect_run_stats:
+    runtime: 20
+    mem_mb: 4000
+    cpus_per_task: 1
+  fig_backend_yield:
+    runtime: 20
+    mem_mb: 4000
+    cpus_per_task: 1
