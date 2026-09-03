@@ -14,7 +14,7 @@ Run after rsync-ing results/abcfold/ + results/metadata/ back from IFB.
   plip_to_csv        pliparser -> summary.csv
   aggregate          -> all_selected_summary_<pass>.csv
   + report figures (dim-reduction, PLIP heatmaps, minimize energy) and
-    reports/postprocessing.html (onsuccess)
+    reports/postprocessing.zip (onsuccess; unzip -> postprocessing/report.html)
 
 Usage:
   snakemake -s workflows/postprocessing/Snakefile --use-conda --cores 4

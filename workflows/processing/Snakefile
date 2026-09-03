@@ -13,7 +13,7 @@ config.yaml's slurm.size_classes[<size_class>].
   merge_metadata    -> results/metadata/all_models.parquet
   collect_run_stats -> reports/processing/{timings,compression}.csv
   fig_backend_yield -> per-backend model-count bar
-  reports/processing.html  (onsuccess hook)
+  reports/processing.zip  (onsuccess hook; unzip -> processing/report.html)
 
 Usage (IFB login node, after rsync-ing data/fold_inputs/):
   snakemake -s workflows/processing/Snakefile \

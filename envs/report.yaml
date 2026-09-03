@@ -1,10 +1,12 @@
 name: ab-initio-report
 # Report figure/table rules for all 3 stages — MSA coverage, domain bars,
 # disorder curves, per-backend yield, minimize energy traces, dim-reduction
-# panels, PLIP heatmaps. datavzrd itself is in envs/controller.yaml (the
-# onsuccess hook runs it); this env is for the matplotlib/seaborn figures.
+# panels, PLIP heatmaps (matplotlib/seaborn), plus the interactive datavzrd
+# table bundles embedded in each stage's HTML report. datavzrd is also in
+# envs/controller.yaml for the onsuccess `snakemake --report` call.
 channels:
   - conda-forge
+  - bioconda
   - nodefaults
 dependencies:
   - python=3.11
@@ -15,3 +17,4 @@ dependencies:
   - seaborn>=0.13
   - scikit-learn>=1.4
   - pyyaml>=6.0
+  - datavzrd>=2.36

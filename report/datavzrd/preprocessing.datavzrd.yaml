@@ -1,0 +1,68 @@
+name: "Preprocessing tables"
+
+default-view: input_stats
+
+datasets:
+  input_stats:
+    path: "input_stats.csv"
+    separator: "\t"
+  templates:
+    path: "templates.csv"
+    separator: ","
+
+views:
+  input_stats:
+    dataset: input_stats
+    desc: |
+      Per-chain token budget and MSA depth for the ABCfold input. The final
+      `TOTAL` row carries run-wide metadata (seed count, JSON size, backend
+      list, token-cap risk) in the remaining cells.
+    render-table:
+      columns:
+        chain:
+          label: "chain"
+        type:
+          label: "type"
+        length:
+          label: "residues"
+        tokens:
+          label: "tokens"
+        msa_depth:
+          label: "MSA depth"
+        n_templates:
+          label: "templates"
+
+  templates:
+    dataset: templates
+    desc: |
+      PDB templates MMseqs2 attached to each chain, ordered by MMseqs2 rank
+      (`idx`). `pdb_id` links out to RCSB.
+    page-size: 20
+    render-table:
+      columns:
+        chain:
+          label: "chain"
+        idx:
+          label: "rank"
+        pdb_id:
+          label: "PDB"
+          link-to-url:
+            RCSB:
+              url: "https://www.rcsb.org/structure/{pdb_id}"
+        query_start:
+          label: "q. start"
+        query_end:
+          label: "q. end"
+        n_res:
+          label: "aligned res."
+          plot:
+            bars:
+              scale: linear
+        mmcif_bytes:
+          label: "mmCIF bytes"
+          plot:
+            heatmap:
+              scale: linear
+              range:
+                - "#1f5c43"
+                - "#2ca25f"

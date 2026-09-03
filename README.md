@@ -26,7 +26,7 @@ No script edits.
 │                        disorder (IUPred3 long/short + ANCHOR2 + AIUPred)     │
 │                        MoRF (MoRFchibi2, tools/MC2)                          │
 │                     ─► data/annotation/<sys>/annotation.yaml  [HUMAN REVIEW] │
-│  ─► reports/preprocessing.html                                              │
+│  ─► reports/preprocessing.zip  (unzip → preprocessing/report.html)          │
 └────────────────────────────────┬───────────────────────────────────────────┘
                      rsync data/fold_inputs/  ►  IFB
 ┌─ STAGE 2  processing (IFB login node) ─────────────────────────────────────┐
@@ -34,7 +34,7 @@ No script edits.
 │                                                                            │
 │  one SLURM job / system:  abcfold -abcopr  (6 backends together)            │
 │  ─► metadata compression (arrays.h5 + model_metadata.parquet)              │
-│  ─► reports/processing.html                                                 │
+│  ─► reports/processing.zip                                                  │
 └────────────────────────────────┬───────────────────────────────────────────┘
               rsync results/abcfold/ results/metadata/  ◄  IFB
 ┌─ STAGE 3  postprocessing (local) ─────────────────────────────────────────┐
@@ -44,13 +44,17 @@ No script edits.
 │  interface metrics over the FULL ensemble:  ipSAE · iLIS · Pinc             │
 │  pose clustering (HDBSCAN + Optuna/DBCV, or GMM/BIC)                        │
 │  top-N/cluster ─► ChimeraX minimize ─► fix_pdb ─► PLIP ×passes ─► aggregate │
-│  ─► reports/postprocessing.html  (dim-reduction panels, PLIP heatmaps, …)   │
+│  ─► reports/postprocessing.zip   (dim-reduction panels, PLIP heatmaps, …)   │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
-Each stage's **default target builds a self-contained HTML report**
-(`reports/<stage>.html`) via an `onsuccess:` hook — figures are SVG/PDF only,
-never raster.
+Each stage's **default target builds a self-contained report bundle**
+(`reports/<stage>.zip`) via an `onsuccess:` hook — unzip it and open
+`<stage>/report.html`. It ships as a `.zip` rather than a bare `.html` so the
+interactive datavzrd tables can be embedded (browsers block the `data:` URLs
+Snakemake would otherwise use for embedded HTML). A dark theme is the default,
+from `report/custom.css` (injected via `--report-stylesheet`); figures are
+SVG/PDF only, never raster.
 
 ---
 
@@ -90,7 +94,7 @@ snakemake -s workflows/postprocessing/Snakefile --use-conda --cores 4
 | `scripts/` | carried from the DRB2 pipeline + new (`lib_pipeline.py`, `annotate_*`, `compute_interface_metrics.py`, `cluster_poses.py`, plotters) |
 | `workflows/<stage>/Snakefile` | the three stage workflows |
 | `workflows/processing/profiles/ifb/` | SLURM executor-plugin profile |
-| `report/` | per-stage `.rst` captions, `custom.css`, datavzrd templates |
+| `report/` | per-stage `.rst` captions, `custom.css` (dark theme), `datavzrd/*.datavzrd.yaml` table specs |
 | `data/ results/ logs/ reports/` | runtime outputs (gitignored) |
 
 ## Carried real examples
@@ -103,6 +107,8 @@ shape on the fly (`anchor_chain` → `anchor_chains: [..]`, the legacy
 
 ## Status
 
-**Stage 1 is implemented and DAG-validated.** Stages 2–3 and the datavzrd
-table bundles are scaffolded per [`../ab_initio_pipeline` plan]; see
+**Stage 1 is implemented and DAG-validated**, including the interactive
+datavzrd table bundles (`report/datavzrd/preprocessing.datavzrd.yaml`,
+embedded dark-skinned in `reports/preprocessing.zip`). Stages 2–3 and their
+own datavzrd bundles are scaffolded per [`../ab_initio_pipeline` plan]; see
 `git log` / the plan file for what remains.

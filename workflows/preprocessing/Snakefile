@@ -11,7 +11,8 @@ Prepares everything ABCfold needs, plus sequence annotation.
       annotate_morf        MoRFchibi2 (tools/MC2) -> morf.tsv
       merge_annotation     -> data/annotation/<sys>/annotation.yaml  (HUMAN REVIEW)
   1d. abcfold_input_stats  chains / residues / tokens / MSA depth / token-cap risk
-  1e. report figures/tables + reports/preprocessing.html  (built by onsuccess)
+  1e. report figures + interactive datavzrd tables + reports/preprocessing.html
+      (the HTML is built by the onsuccess hook)
 
 Usage:
   snakemake -s workflows/preprocessing/Snakefile --use-conda --cores 2
@@ -30,6 +31,7 @@ if (REPO / "config.local.yaml").exists():
 report: "../../report/preprocessing.rst"
 
 CFG = load_config(REPO)
+DATAVZRD = bool(CFG["report"].get("datavzrd", False))
 DIRS = CFG["dirs"]
 FOLD = Path(DIRS["fold_inputs"])
 ANN = Path(DIRS["annotation"])
@@ -57,6 +59,7 @@ rule all:
         prot_figs("disorder"),
         [str(REP / s / "templates.csv") for s in SYSTEMS],
         [str(REP / s / "input_stats.csv") for s in SYSTEMS],
+        ([str(REP / s / "tables") for s in SYSTEMS] if DATAVZRD else []),
 
 
 # ── 1a. fold_input.json ────────────────────────────────────────────────────
@@ -271,13 +274,14 @@ rule fig_disorder:
         """
 
 
+# The two CSVs below feed the interactive datavzrd bundle (rule
+# datavzrd_preprocessing) — that directory is what gets `report(...)`-flagged,
+# so the raw CSVs stay plain outputs here.
 rule table_templates:
     input:
         resolved=str(FOLD / "{system}" / "fold_input.resolved.json"),
     output:
-        report(str(REP / "{system}" / "templates.csv"),
-               category="1. Preprocessing", subcategory="Template hits",
-               labels={"system": "{system}"}),
+        str(REP / "{system}" / "templates.csv"),
     conda:
         "../../envs/annotate.yaml"
     shell:
@@ -291,11 +295,38 @@ rule table_input_stats:
     input:
         tsv=str(ANN / "{system}" / "input_stats.tsv"),
     output:
-        report(str(REP / "{system}" / "input_stats.csv"),
-               category="1. Preprocessing", subcategory="Input stats",
-               labels={"system": "{system}"}),
+        str(REP / "{system}" / "input_stats.csv"),
     shell:
         "cp {input.tsv} {output[0]}"
+
+
+# ── 1e. interactive tables — datavzrd bundle embedded in the .zip report ──
+# datavzrd emits a multi-file bundle; `snakemake --report` embeds it only for
+# a .zip report (build_report.sh does exactly that). style_datavzrd.py then
+# inlines the dark skin so the tables match the rest of the report.
+rule datavzrd_preprocessing:
+    input:
+        config=str(REPO / "report" / "datavzrd" / "preprocessing.datavzrd.yaml"),
+        css=str(REPO / "scripts" / "datavzrd-dark.css"),
+        templates=str(REP / "{system}" / "templates.csv"),
+        input_stats=str(REP / "{system}" / "input_stats.csv"),
+    output:
+        report(directory(str(REP / "{system}" / "tables")),
+               category="1. Preprocessing", subcategory="Interactive tables",
+               labels={"system": "{system}"},
+               htmlindex="index.html"),
+    conda:
+        "../../envs/report.yaml"
+    log:
+        str(LOG / "datavzrd" / "{system}.log"),
+    shell:
+        r"""
+        (
+          cd "$(dirname {input.templates})" \
+            && datavzrd "{input.config}" --overwrite-output --output tables
+        ) > {log} 2>&1
+        python scripts/style_datavzrd.py {output[0]} {input.css} >> {log} 2>&1
+        """
 
 
 onsuccess:
