@@ -121,15 +121,31 @@ table:not(.table-auto) tbody tr:nth-child(even) { background: rgba(255, 255, 255
 .vega-actions a:hover { background: rgba(110, 198, 255, 0.12) !important; }
 
 /* ── figures: matplotlib SVGs bake in a white ground — frame them ───────── */
+/* Let the single-figure view use the whole main column instead of shrink-
+   wrapping to the SVG's intrinsic ~880 px (which left the plot small and
+   clipped its edge labels). */
+.grow.items-center.justify-center { align-items: stretch !important; }
+.grow.items-center.justify-center > * {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
 .results img, .results svg,
-.grow img, .grow object,
+.grow img, .grow object, .grow > * > svg,
 img[src$=".svg"], object[type="image/svg+xml"] {
-  background: #ffffff;
-  border-radius: 8px;
-  padding: 10px;
-  box-shadow: 0 1px 0 var(--ab-border);
-  max-width: 100%;
+  display: block;
+  width: 100%;
+  max-width: 1200px;
   height: auto;
+  margin: 0 auto;
+  box-sizing: border-box;
+  background: #ffffff;
+  /* white "padding" as a border so Chrome's `img { overflow: clip }` can't
+     crop the plot's outer labels/legend. */
+  border: 16px solid #ffffff;
+  border-radius: 10px;
+  overflow: visible;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
 }
 
 /* ── headings / misc ──────────────────────────────────────────────────── */

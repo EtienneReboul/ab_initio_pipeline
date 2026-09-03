@@ -79,7 +79,7 @@ def main() -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     stem = out.with_suffix("")
     for fmt in args.formats.split(","):
-        fig.savefig(f"{stem}.{fmt.strip()}")
+        fig.savefig(f"{stem}.{fmt.strip()}", bbox_inches="tight")
     plt.close(fig)
     print(f"[plot_domain_bar] -> {out}")
     return 0

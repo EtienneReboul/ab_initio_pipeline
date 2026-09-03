@@ -90,7 +90,7 @@ def main() -> int:
 
     stem = out.with_suffix("")
     for fmt in args.formats.split(","):
-        fig.savefig(f"{stem}.{fmt.strip()}")
+        fig.savefig(f"{stem}.{fmt.strip()}", bbox_inches="tight")
     plt.close(fig)
     print(f"[plot_msa_coverage] -> {out}")
     return 0
