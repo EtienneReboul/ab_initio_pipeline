@@ -39,3 +39,8 @@ build/
 *.swp
 *.swo
 *~
+# ── Claude ───────────────────────────────────────────────────────────────────
+.claude/
+handoff.md
+TEMPLATING.md
+prompt-for-ab-initio-pipeline.md
