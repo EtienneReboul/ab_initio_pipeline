@@ -78,13 +78,18 @@ def res_runtime(wildcards):
 def res_mem_mb(wildcards):
     return int(str(_sc(wildcards.system)["mem"]).rstrip("Gg")) * 1024
 
+def res_gres(wildcards):
+    # e.g. "gpu:l40s:1" — snakemake-executor-plugin-slurm >=2.7 wants the GPU
+    # request via this `gres` resource, NOT as --gres in slurm_extra.
+    return _sc(wildcards.system)["gres"]
+
 def res_slurm_extra(wildcards):
-    sc = _sc(wildcards.system)
-    parts = [f"--gres={sc['gres']}"]
+    # Only genuinely "extra" sbatch flags belong here. account -> slurm_account,
+    # gres -> gres, partition/runtime/mem/cpus -> their own resource keys
+    # (plugin >=2.7 hard-errors if any of those appear in slurm_extra).
+    parts = []
     if SL.get("exclude_nodes"):
         parts.append(f"--exclude={SL['exclude_nodes']}")
-    if SL.get("account"):
-        parts.append(f"--account={SL['account']}")
     return " ".join(parts)
 
 
@@ -130,6 +135,8 @@ rule run_abcfold:
         str(LOG / "run_abcfold" / "{system}.log"),
     resources:
         slurm_partition=res_partition,
+        slurm_account=SL.get("account", ""),
+        gres=res_gres,
         runtime=res_runtime,
         mem_mb=res_mem_mb,
         cpus_per_task=SL["cpus"],

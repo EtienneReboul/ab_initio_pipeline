@@ -72,8 +72,13 @@ snakemake -s workflows/preprocessing/Snakefile --use-conda --cores 2
 #    into configs/<system>.yaml, set `annotation_reviewed: true`
 
 # 3. STAGE 2 — on an IFB login node, after rsync-ing data/fold_inputs/
-snakemake -s workflows/processing/Snakefile \
-    --profile workflows/processing/profiles/ifb --until prime_backends   # once
+#    `module load snakemake/9.4.0` also exists but its slurm executor plugin
+#    (2.6.0) hangs silently at job submission — use an existing project conda
+#    env's snakemake (>=9.24, slurm plugin >=2.7) instead:
+export PATH=/shared/projects/<your_project>/conda/envs/<env_with_snakemake>/bin:$PATH
+export CONDA_PKGS_DIRS="$PWD/.conda_pkgs"   # isolate rule-env builds from a shared cache
+snakemake -s workflows/processing/Snakefile --unlock 2>/dev/null || true
+snakemake -s workflows/processing/Snakefile --until prime_backends -c1 -p   # once, no GPU
 snakemake -s workflows/processing/Snakefile --profile workflows/processing/profiles/ifb
 
 # 4. STAGE 3 — local, after rsync-ing results/abcfold/ + results/metadata/
