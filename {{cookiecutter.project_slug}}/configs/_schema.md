@@ -5,7 +5,7 @@ file (besides one line in `config.yaml`) you edit to add a new dataset.
 
 ```yaml
 name: my_system            # must equal the filename stem and the systems: entry
-size_class: small          # key into config.yaml slurm.size_classes {small,large}
+size_class: small          # key into config.yaml hpc.<scheduler>.size_classes {small,large}
 
 # ── Chains ────────────────────────────────────────────────────────────────
 # Order defines the fold_input.json chain order. ids must be unique A,B,C…
@@ -60,11 +60,8 @@ plip_host:
   docker_platform: "linux/amd64"   # "" for native linux
 ```
 
-## Carried real examples
+## Worked example
 
-`drb2_drb4.yaml`, `rna_ds_drb2_drb4.yaml`, `rna_ds_dcl4_drb2_drb4.yaml` (DRB2
-pipeline) and `ago1_fbw2*.yaml` (AGO1 pipeline) are included verbatim as
-worked references. They predate this schema's `anchor_chains` (list),
-`size_class`, `annotation_reviewed`, `domains` and `plip_passes` keys —
-`scripts/migrate_config.py` upgrades an old-style file, or edit by hand
-using `example_toy.yaml` as the template.
+`example_toy.yaml` (a ubiquitin homodimer smoke test) is included as a
+worked reference for this schema — use it as the template when adding a
+new `configs/<system>.yaml`.

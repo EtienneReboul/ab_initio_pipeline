@@ -1,0 +1,50 @@
+# Snakemake profile for Stage 2 on a PBS/Torque cluster, via
+# snakemake-executor-plugin-pbs (github.com/jasonho1308/snakemake-executor-plugin-pbs).
+#
+# UNTESTED — this pipeline has only ever been run against SLURM on IFB (see
+# README.md "Non-SLURM schedulers" before relying on this). Adjust
+# `pbs-queue` and `pbs-extra-qsub-args` (GPU request syntax is very
+# site-specific — this plugin has no native GPU resource) for your site.
+#
+# Unlike the slurm plugin, this one takes queue/account/extra-qsub-args as
+# profile-level settings only — there's no per-rule equivalent, so (unlike
+# partition on the IFB/slurm profile) these can't vary by system size_class.
+# Per-system mem/runtime still can: they come from the run_abcfold rule's
+# own resources (workflows/processing/Snakefile), sourced from config.yaml's
+# hpc.pbs.size_classes — the defaults below are only the fallback for the
+# smaller utility rules that don't set their own.
+#
+# Run from a login/submit node:
+#   snakemake -s workflows/processing/Snakefile --profile workflows/processing/profiles/pbs
+executor: pbs
+use-conda: true
+conda-frontend: mamba
+jobs: 8
+latency-wait: 90
+retries: 1
+printshellcmds: true
+rerun-incomplete: true
+
+pbs-queue: "gpu"
+pbs-account: "{{ cookiecutter.cluster_account }}"
+pbs-default-walltime: "10:00:00"
+# pbs-extra-qsub-args: "-l select=1:ngpus=1"   # site-specific GPU request
+
+default-resources:
+  mem_mb: 80000
+  runtime: 600            # minutes — overridden per-system by run_abcfold
+
+# compress_metadata / merge_metadata / report rules are light: keep them tiny.
+set-resources:
+  compress_metadata:
+    runtime: 120
+    mem_mb: 16000
+  merge_metadata:
+    runtime: 30
+    mem_mb: 8000
+  collect_run_stats:
+    runtime: 20
+    mem_mb: 4000
+  fig_backend_yield:
+    runtime: 20
+    mem_mb: 4000

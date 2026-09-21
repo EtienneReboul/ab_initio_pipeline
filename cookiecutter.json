@@ -1,0 +1,26 @@
+{
+    "first_system_name": "example_toy",
+    "project_slug": "abcfold_ifb_{{ cookiecutter.first_system_name }}_complex",
+    "contact_email": "you@example.org",
+    "scheduler": ["slurm", "pbs", "htcondor"],
+    "cluster_account": "your_cluster_account",
+    "chimerax_bin": "/Applications/ChimeraX.app/Contents/MacOS/ChimeraX",
+    "backends": "alphafold3,boltz,chai1,openfold3,protenix,rosettafold3",
+    "setup_first_system_now": ["no", "yes"],
+    "_copy_without_render": [
+        "scripts/*",
+        "workflows/preprocessing/*",
+        "workflows/postprocessing/*",
+        "workflows/processing/Snakefile",
+        "workflows/processing/_reference/*",
+        "workflows/processing/profiles/ifb/*",
+        "workflows/processing/profiles/htcondor/*",
+        "tools/*",
+        "envs/*",
+        "report/*",
+        "data/*",
+        "results/*",
+        "reports/*",
+        "logs/*"
+    ]
+}

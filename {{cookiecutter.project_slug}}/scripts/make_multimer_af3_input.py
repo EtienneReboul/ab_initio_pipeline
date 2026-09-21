@@ -12,8 +12,8 @@ AlphaFold3, Boltz-2, Chai-1, OpenFold3, Protenix and RosettaFold3 together.
 Generalizes ../../../NPF-ab-initio-modelling/ABCfold_NPF_pipeline/scripts/
 make_af3_input.py (single protein + optional ligand) to an arbitrary
 multi-chain complex (N protein chains + N RNA chains), read from a
-configs/<complex>.yaml chain spec (see configs/drb2_drb4.yaml and
-configs/rna_ds_dcl4_drb2_drb4.yaml).
+configs/<complex>.yaml chain spec (see configs/example_toy.yaml and
+configs/_schema.md).
 
 This file has no MSA or templates embedded yet — scripts/fetch_mmseqs2_msa.py
 (stage 1b) adds those from the ColabFold MMseqs2 webserver, once per
@@ -21,8 +21,8 @@ complex, producing fold_input.resolved.json.
 
 Usage (called by Snakemake rule `prepare_af3_input`):
     python scripts/make_multimer_af3_input.py \\
-        --complex-config    configs/rna_ds_dcl4_drb2_drb4.yaml \\
-        --output            data/fold_inputs/rna_ds_dcl4_drb2_drb4/fold_input.json \\
+        --complex-config    configs/<system>.yaml \\
+        --output            data/fold_inputs/<system>/fold_input.json \\
         --n-replicas        20 \\
         --seed-strategy      sequential \\
         --seed-base          1 \\

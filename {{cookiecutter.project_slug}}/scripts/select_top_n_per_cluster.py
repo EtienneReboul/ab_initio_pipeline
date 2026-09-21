@@ -11,9 +11,9 @@ layout.
 
 Usage:
     python scripts/select_top_n_per_cluster.py \\
-        --pose-clusters       results/rna_ds_dcl4_drb2_drb4/pose_clusters.csv \\
+        --pose-clusters       results/<system>/pose_clusters.csv \\
         --abcfold-output-root results/abcfold \\
-        --out-root            results/rna_ds_dcl4_drb2_drb4 \\
+        --out-root            results/<system> \\
         --top-n 20 --rank-by ranking_score
 """
 

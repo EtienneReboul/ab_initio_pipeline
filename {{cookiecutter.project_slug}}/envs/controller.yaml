@@ -1,0 +1,39 @@
+name: ab-initio-pipeline
+# Controller environment — drives Snakemake orchestration for all 3 stages.
+# Per-rule compute envs are the other envs/*.yaml, built automatically via
+# --use-conda (stages 1 & 3). Stage 2 submits to a cluster scheduler via a
+# Snakemake executor plugin — which one depends on config.yaml's
+# hpc.scheduler (see README.md "Non-SLURM schedulers"):
+#   slurm     — snakemake-executor-plugin-slurm, installed below (validated
+#               on IFB; this is the only scheduler this pipeline has
+#               actually been run against).
+#   htcondor  — snakemake-executor-plugin-htcondor, also installed below
+#               (official package, harmless to install even if unused).
+#   pbs       — NOT installed here: snakemake-executor-plugin-pbs isn't on
+#               PyPI yet (as of 2026-09), and pulling an unreleased,
+#               unofficial package straight from GitHub into this shared
+#               env risks breaking `conda env create` for everyone,
+#               including SLURM users, if that repo ever moves or breaks.
+#               If hpc.scheduler is "pbs", install it yourself:
+#                 pip install "snakemake-executor-plugin-pbs @ git+https://github.com/jasonho1308/snakemake-executor-plugin-pbs"
+#
+# Install:
+#   conda env create -f envs/controller.yaml
+#   conda activate ab-initio-pipeline
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+dependencies:
+  - python=3.11
+  - snakemake>=8.4
+  - snakemake-executor-plugin-slurm>=0.11
+  - snakemake-wrapper-utils>=0.6
+  - datavzrd>=2.36
+  - pyyaml>=6.0
+  - conda
+  - mamba
+  - pip
+  - pip:
+      - snakemake-executor-plugin-slurm     # in case bioconda lags
+      - snakemake-executor-plugin-htcondor

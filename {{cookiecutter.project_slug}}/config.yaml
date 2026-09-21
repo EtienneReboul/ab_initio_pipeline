@@ -23,12 +23,8 @@
 # ── Systems to run ───────────────────────────────────────────────────────────
 # One configs/<name>.yaml per entry. Comment/uncomment to scope a run.
 systems:
-  - example_toy
-  # - drb2_drb4
-  # - rna_ds_drb2_drb4
-  # - rna_ds_dcl4_drb2_drb4
-  # - ago1_fbw2
-  # - ago1_fbw2_mir165a
+  - {{ cookiecutter.first_system_name }}
+  # - another_system
 
 # ── Stage 1a: fold_input.json (AlphaFold3-dialect, consumed by ABCfold) ──────
 af3:
@@ -88,36 +84,84 @@ annotate:
 # ── Stage 2: ABCfold run ────────────────────────────────────────────────────
 abcfold:
   models:
-    alphafold3: true           # -a
-    boltz: true                # -b
-    chai1: true                # -c
-    openfold3: true            # -o
-    protenix: true             # -p
-    rosettafold3: true         # -r
-  model_params: "/shared/bank/alphafold3/current"   # AF3 weights dir (IFB)
+    alphafold3: {{ 'true' if 'alphafold3' in cookiecutter.backends else 'false' }}           # -a
+    boltz: {{ 'true' if 'boltz' in cookiecutter.backends else 'false' }}                # -b
+    chai1: {{ 'true' if 'chai1' in cookiecutter.backends else 'false' }}                # -c
+    openfold3: {{ 'true' if 'openfold3' in cookiecutter.backends else 'false' }}            # -o
+    protenix: {{ 'true' if 'protenix' in cookiecutter.backends else 'false' }}             # -p
+    rosettafold3: {{ 'true' if 'rosettafold3' in cookiecutter.backends else 'false' }}         # -r
+  model_params: "/shared/bank/alphafold3/current"   # AF3 weights dir — path tested on IFB; on any
+                                                      # other cluster, edit this to your own AF3
+                                                      # weights location (see README.md)
   af3_module_version: "3.0.2"  # version component of IFB's alphafold module/wrapper path
   af3_sif_path: ""             # override only — empty = auto-discover (abcfold_cluster_env.sh)
   number_of_models: 5          # ABCfold --number_of_models (diffusion samples / seed)
   num_recycles: 10             # AF3 recycles (ignored by OpenFold3, per ABCfold README)
 
-# ── Stage 2: SLURM (snakemake-executor-plugin-slurm, run from IFB login node) ─
-# Per-rule resources are selected by each system's `size_class:` key.
-slurm:
-  account: "npf_abinitio"
-  partition: "gpu"
-  cpus: 8
-  cuda_module_version: "12.9.1"          # IFB cuda-toolkit module — Protenix needs CUDA_HOME
-  exclude_nodes: "gpu-node-7,gpu-node-9" # confirmed infra issues (empty string to stop excluding)
-  metadata_env: "metadata-compress"     # conda env for compress_abcfold_metadata.py on the cluster
-  size_classes:
-    small:                              # <= ~1000 tokens — all 6 backends fit
-      gres: "gpu:l40s:1"
-      mem: "80G"
-      runtime: 600                      # minutes
-    large:                              # ~2000-2700 tokens — Chai-1/Protenix/Boltz likely fail on token caps
-      gres: "gpu:h200:1"
-      mem: "250G"
-      runtime: 2880
+# ── Stage 2: HPC cluster / scheduler ────────────────────────────────────────
+# (named `hpc`, not `cluster`, to not collide with the pose-`cluster:` key
+# below — this is about job scheduling, not pose clustering.)
+# `scheduler` picks which of the slurm/pbs/htcondor blocks below the stage-2
+# Snakefile reads to build each job's resource request — chosen once at
+# `cookiecutter` generation time (rerun cookiecutter, or just hand-edit
+# `scheduler` + the matching block, to switch later). Per-rule sizing is
+# selected by each system's `size_class:` key within the active block.
+#
+# Only the `slurm` block is validated — this pipeline was built and run
+# end-to-end against the IFB Core Cluster (France Bioinformatique; see
+# README.md "Running on IFB"). `pbs` and `htcondor` follow each executor
+# plugin's own documented resource keys but have NOT been run against a
+# live PBS/Torque or HTCondor pool — see README.md "Non-SLURM schedulers"
+# before relying on them, and expect to tune queue/account/GPU-request
+# syntax for your site regardless of scheduler.
+hpc:
+  scheduler: "{{ cookiecutter.scheduler }}"   # slurm | pbs | htcondor
+  account: "{{ cookiecutter.cluster_account }}"   # SLURM account / PBS account — unused for htcondor
+  cpus: 8                       # threads per job, every scheduler
+  cuda_module_version: "12.9.1" # IFB cuda-toolkit module — Protenix needs CUDA_HOME; adjust off IFB
+  metadata_env: "metadata-compress"   # conda env for compress_abcfold_metadata.py on the cluster
+
+  # snakemake-executor-plugin-slurm — validated on IFB.
+  slurm:
+    partition: "gpu"                      # IFB partition name — rename for your cluster
+    exclude_nodes: "gpu-node-7,gpu-node-9" # IFB nodes with confirmed infra issues (empty string to
+                                            # stop excluding; irrelevant off IFB)
+    size_classes:
+      small:                              # <= ~1000 tokens — all 6 backends fit
+        gres: "gpu:l40s:1"
+        mem: "80G"
+        runtime: 600                      # minutes
+      large:                              # ~2000-2700 tokens — Chai-1/Protenix/Boltz likely fail on token caps
+        gres: "gpu:h200:1"
+        mem: "250G"
+        runtime: 2880
+
+  # snakemake-executor-plugin-pbs (github.com/jasonho1308/snakemake-executor-plugin-pbs
+  # as of 2026-09 — not yet on PyPI; see envs/controller.yaml for the install
+  # command). UNTESTED. Unlike slurm's plugin, this one only takes
+  # queue/account/extra-qsub-args as PROFILE-level settings, not per-rule
+  # resources — see `workflows/processing/profiles/pbs/config.yaml`, not
+  # this file, for those. `size_classes` here only feeds the generic
+  # `mem`/`runtime` keys the plugin does read per rule (same shape as
+  # slurm's, since the plugin maps them the same way: mem -> `-l mem=`,
+  # runtime minutes -> `-l walltime=`). No native GPU resource — request a
+  # GPU queue via the profile's `pbs-queue`, or GPU qsub flags via
+  # `pbs-extra-qsub-args` there (applies to every job, not per size_class).
+  pbs:
+    size_classes:
+      small: {mem: "80G", runtime: 600}     # minutes
+      large: {mem: "250G", runtime: 2880}
+
+  # snakemake-executor-plugin-htcondor (github.com/htcondor/snakemake-executor-plugin-htcondor).
+  # UNTESTED. `account` above isn't wired in here — most HTCondor pools
+  # don't use SLURM/PBS-style accounting; add a `+AccountingGroup` classad
+  # yourself in the profile if your pool needs one.
+  htcondor:
+    universe: "vanilla"
+    request_gpus: 1
+    size_classes:
+      small: {request_memory: "80GB", request_disk: "20GB"}
+      large: {request_memory: "250GB", request_disk: "60GB"}
 
 # ── Stage 3a: anchor alignment (rigid-core Kabsch, one refinement per anchor) ─
 align:
@@ -176,5 +220,5 @@ dirs:
   logs:        "logs"
 
 # ── Host-specific tool paths (override in config.local.yaml) ────────────────
-chimerax_bin: "/Applications/ChimeraX-1.12.app/Contents/MacOS/ChimeraX"
+chimerax_bin: "{{ cookiecutter.chimerax_bin }}"
 plip_image: "docker.io/pharmai/plip:latest"

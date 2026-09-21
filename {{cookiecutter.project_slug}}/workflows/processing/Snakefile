@@ -1,9 +1,15 @@
 """
-workflows/processing/Snakefile — Stage 2 (IFB login node, SLURM executor plugin)
+workflows/processing/Snakefile — Stage 2 (executor plugin: slurm | pbs | htcondor)
 ==============================================================================
-Replaces the DRB2 pipeline's submit_abcfold.sh. One SLURM job per system,
-launched by snakemake-executor-plugin-slurm; per-system resources come from
-config.yaml's slurm.size_classes[<size_class>].
+Replaces the DRB2 pipeline's submit_abcfold.sh. One cluster job per system;
+per-system resources come from config.yaml's hpc.<scheduler>.size_classes[<size_class>].
+`hpc.scheduler` (set at cookiecutter generation time) picks which executor
+plugin's resource keys the run_abcfold/prime_backends rules populate — the
+`resources:` block below declares the union of all three schedulers' keys,
+each resolved by its own res_* function; only the keys the active plugin
+actually looks at have any effect, so this file needs no edits when you
+switch scheduler (just `hpc.scheduler` + a matching --profile). Only the
+slurm path is validated (IFB) — see README.md "Non-SLURM schedulers".
 
   prime_backends    opt-in (`--until prime_backends`, on a login node, once):
                     abcfold --dry_run --override installs every selected
@@ -15,7 +21,8 @@ config.yaml's slurm.size_classes[<size_class>].
   fig_backend_yield -> per-backend model-count bar
   reports/processing.zip  (onsuccess hook; unzip -> processing/report.html)
 
-Usage (IFB login node, after rsync-ing data/fold_inputs/):
+Usage (login node, after rsync-ing data/fold_inputs/) — pick the profile
+matching config.yaml's hpc.scheduler:
   snakemake -s workflows/processing/Snakefile \
       --profile workflows/processing/profiles/ifb --until prime_backends
   snakemake -s workflows/processing/Snakefile \
@@ -45,7 +52,8 @@ REP = Path(DIRS["reports"]) / "processing"
 LOG = Path(DIRS["logs"]) / "processing"
 SYSTEMS = CFG["systems"]
 SPECS = {s: load_system(s, REPO) for s in SYSTEMS}
-SL = CFG["slurm"]
+HPC = CFG["hpc"]
+SCHED = HPC["scheduler"]
 ABCFG = CFG["abcfold"]
 
 MODEL_FLAG = "-" + "".join(
@@ -65,32 +73,76 @@ if _unreviewed and not config.get("skip_annotation_gate"):
     )
 
 
-# ── per-system SLURM resource resolver (read by the slurm executor plugin) ──
+# ── per-system, per-scheduler resource resolvers ─────────────────────────────
+# Each rule's `resources:` block below declares every key across all three
+# schedulers; the res_* functions here are only ever consulted by the
+# executor plugin that actually recognizes them, so declaring all three
+# harmlessly is simpler (and safer to keep in sync) than templating the
+# rule itself per scheduler.
 def _sc(system):
-    return SL["size_classes"][SPECS[system]["size_class"]]
+    return HPC[SCHED]["size_classes"][SPECS[system]["size_class"]]
 
-def res_partition(wildcards):
-    return SL["partition"]
 
+# -- generic: mem_mb / runtime are read verbatim (unprefixed) by BOTH the
+# slurm and pbs plugins, from each one's own hpc.<scheduler>.size_classes
+# block (same "80G" / minutes shape in both, by design — see config.yaml).
+# No-op (0) for htcondor, which uses its own htcondor_request_mem_mb below.
 def res_runtime(wildcards):
+    if SCHED not in ("slurm", "pbs"):
+        return 0
     return int(_sc(wildcards.system)["runtime"])
 
 def res_mem_mb(wildcards):
+    if SCHED not in ("slurm", "pbs"):
+        return 0
     return int(str(_sc(wildcards.system)["mem"]).rstrip("Gg")) * 1024
+
+
+# -- slurm (snakemake-executor-plugin-slurm) — validated on IFB -------------
+def res_slurm_partition(wildcards):
+    return HPC["slurm"]["partition"]
+
+def res_slurm_account(wildcards):
+    return HPC.get("account", "")
 
 def res_gres(wildcards):
     # e.g. "gpu:l40s:1" — snakemake-executor-plugin-slurm >=2.7 wants the GPU
     # request via this `gres` resource, NOT as --gres in slurm_extra.
-    return _sc(wildcards.system)["gres"]
+    return _sc(wildcards.system)["gres"] if SCHED == "slurm" else ""
 
 def res_slurm_extra(wildcards):
     # Only genuinely "extra" sbatch flags belong here. account -> slurm_account,
     # gres -> gres, partition/runtime/mem/cpus -> their own resource keys
     # (plugin >=2.7 hard-errors if any of those appear in slurm_extra).
+    if SCHED != "slurm":
+        return ""
     parts = []
-    if SL.get("exclude_nodes"):
-        parts.append(f"--exclude={SL['exclude_nodes']}")
+    if HPC["slurm"].get("exclude_nodes"):
+        parts.append(f"--exclude={HPC['slurm']['exclude_nodes']}")
     return " ".join(parts)
+
+
+# pbs (snakemake-executor-plugin-pbs) — UNTESTED, see README.md. Nothing
+# extra needed here: it reads the generic mem_mb/runtime/threads above;
+# queue/account/extra-qsub-args are profile-level settings for this plugin,
+# see workflows/processing/profiles/pbs/config.yaml.
+
+
+# -- htcondor (snakemake-executor-plugin-htcondor) — UNTESTED, see README.md -
+def res_htcondor_request_mem_mb(wildcards):
+    if SCHED != "htcondor":
+        return 0
+    mem = str(_sc(wildcards.system)["request_memory"])
+    return int(mem.rstrip("GgBb")) * 1024
+
+def res_htcondor_request_disk_mb(wildcards):
+    if SCHED != "htcondor":
+        return 0
+    disk = str(_sc(wildcards.system)["request_disk"])
+    return int(disk.rstrip("GgBb")) * 1024
+
+def res_request_gpus(wildcards):
+    return HPC["htcondor"]["request_gpus"] if SCHED == "htcondor" else 0
 
 
 rule all:
@@ -112,7 +164,7 @@ rule prime_backends:
     params:
         model_params=ABCFG["model_params"],
         af3_ver=ABCFG["af3_module_version"],
-        cuda_ver=SL["cuda_module_version"],
+        cuda_ver=HPC["cuda_module_version"],
         model_flag=MODEL_FLAG,
         out=str(ABC / "_prime"),
     shell:
@@ -133,18 +185,27 @@ rule run_abcfold:
         done=str(ABC / "{system}" / "prediction.done"),
     log:
         str(LOG / "run_abcfold" / "{system}.log"),
+    threads: HPC["cpus"]
     resources:
-        slurm_partition=res_partition,
-        slurm_account=SL.get("account", ""),
-        gres=res_gres,
+        # generic — slurm and pbs both read these unprefixed
         runtime=res_runtime,
         mem_mb=res_mem_mb,
-        cpus_per_task=SL["cpus"],
+        # slurm
+        slurm_partition=res_slurm_partition,
+        slurm_account=res_slurm_account,
+        gres=res_gres,
+        cpus_per_task=HPC["cpus"],
         slurm_extra=res_slurm_extra,
+        # pbs: nothing else — see workflows/processing/profiles/pbs/config.yaml
+        # htcondor
+        htcondor_request_mem_mb=res_htcondor_request_mem_mb,
+        htcondor_request_disk_mb=res_htcondor_request_disk_mb,
+        request_gpus=res_request_gpus,
+        universe=HPC["htcondor"]["universe"] if SCHED == "htcondor" else "vanilla",
     params:
         model_params=ABCFG["model_params"],
         af3_ver=ABCFG["af3_module_version"],
-        cuda_ver=SL["cuda_module_version"],
+        cuda_ver=HPC["cuda_module_version"],
         model_flag=MODEL_FLAG,
         n_models=ABCFG["number_of_models"],
         n_recycles=ABCFG["num_recycles"],

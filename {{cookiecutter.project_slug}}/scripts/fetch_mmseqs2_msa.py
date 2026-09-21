@@ -25,8 +25,8 @@ definition, the RNA/DRB2/DRB4/DCL4 sequences ARE the complex).
 
 Usage (called by Snakemake rule `fetch_mmseqs2_msa`):
     python scripts/fetch_mmseqs2_msa.py \\
-        --input-json   data/fold_inputs/drb2_drb4/fold_input.json \\
-        --output-json  data/fold_inputs/drb2_drb4/fold_input.resolved.json \\
+        --input-json   data/fold_inputs/<system>/fold_input.json \\
+        --output-json  data/fold_inputs/<system>/fold_input.resolved.json \\
         --num-templates 20 \\
         --retries 3 \\
         --delay 8

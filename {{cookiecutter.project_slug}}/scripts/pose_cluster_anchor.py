@@ -51,11 +51,11 @@ Outputs, written to <out-root>/<complex>/:
 
 Usage:
     python scripts/pose_cluster_anchor.py \\
-        --complex             rna_ds_dcl4_drb2_drb4 \\
-        --complex-config      configs/rna_ds_dcl4_drb2_drb4.yaml \\
+        --complex             <system> \\
+        --complex-config      configs/<system>.yaml \\
         --abcfold-output-root results/abcfold \\
         --metadata-root       results/metadata \\
-        --out-root            results/rna_ds_dcl4_drb2_drb4 \\
+        --out-root            results/<system> \\
         --n-iter 8 --core-rmsf-target 1.5 --min-core-frac 0.4 --max-k 12
 """
 

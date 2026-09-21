@@ -1,0 +1,47 @@
+# Snakemake profile for Stage 2 on an HTCondor pool, via
+# snakemake-executor-plugin-htcondor (github.com/htcondor/snakemake-executor-plugin-htcondor).
+#
+# UNTESTED — this pipeline has only ever been run against SLURM on IFB (see
+# README.md "Non-SLURM schedulers" before relying on this).
+#
+# `account` in config.yaml's `hpc:` block is NOT used here — most HTCondor
+# pools don't do SLURM/PBS-style accounting; add a `+AccountingGroup` (or
+# your pool's equivalent classad) below yourself if yours does.
+#
+# This assumes a shared filesystem between the submit node and execute
+# nodes (true on a site-managed pool, e.g. inside one institution; NOT true
+# on most opportunistic pools, e.g. OSG/CHTC, which need `shared-fs-usage`
+# tuned down and the job's inputs/outputs handled via HTCondor file
+# transfer instead — see the plugin's README if that's your setup).
+#
+# Run from a submit node:
+#   snakemake -s workflows/processing/Snakefile --profile workflows/processing/profiles/htcondor
+executor: htcondor
+use-conda: true
+conda-frontend: mamba
+jobs: 8
+latency-wait: 90
+retries: 1
+printshellcmds: true
+rerun-incomplete: true
+
+default-resources:
+  htcondor_request_mem_mb: 80000
+  request_gpus: 1
+  universe: "vanilla"
+
+# compress_metadata / merge_metadata / report rules are light and don't need
+# a GPU: keep them tiny and off the GPU request.
+set-resources:
+  compress_metadata:
+    htcondor_request_mem_mb: 16000
+    request_gpus: 0
+  merge_metadata:
+    htcondor_request_mem_mb: 8000
+    request_gpus: 0
+  collect_run_stats:
+    htcondor_request_mem_mb: 4000
+    request_gpus: 0
+  fig_backend_yield:
+    htcondor_request_mem_mb: 4000
+    request_gpus: 0

@@ -19,9 +19,12 @@
 # ── Annotation contact address (EBI InterProScan REST requires one) ────────
 # REQUIRED for stage 1's annotate_domains rule. Lives ONLY here, never in the
 # tracked config.yaml. Use an institutional address.
+# (cookiecutter's post-gen hook already wrote this for you from the
+# contact_email prompt — this file is a reference for what else can be
+# overridden, and a fallback if you ever need to regenerate config.local.yaml.)
 annotate:
   interproscan:
-    email: "etienne.reboul@cnrs.fr"
+    email: "you@example.org"
 
 # ── SLURM overrides for your IFB account ──────────────────────────────────
 # slurm:
