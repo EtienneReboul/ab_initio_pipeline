@@ -44,6 +44,7 @@ if (REPO / "config.local.yaml").exists():
 report: "../../report/processing.rst"
 
 CFG = load_config(REPO)
+DATAVZRD = bool(CFG["report"].get("datavzrd", False))
 DIRS = CFG["dirs"]
 FOLD = Path(DIRS["fold_inputs"])
 ABC = Path(DIRS["abcfold_out"])
@@ -152,6 +153,7 @@ rule all:
         str(REP / "timings.csv"),
         str(REP / "compression.csv"),
         str(REP / "backend_yield.svg"),
+        ([str(REP / "tables")] if DATAVZRD else []),
 
 
 rule prime_backends:
@@ -265,10 +267,11 @@ rule collect_run_stats:
         [str(ABC / s / "prediction.done") for s in SYSTEMS],
         [str(META / s / "model_metadata.parquet") for s in SYSTEMS],
     output:
-        timings=report(str(REP / "timings.csv"), category="2. Processing",
-                       subcategory="Run timing"),
-        compression=report(str(REP / "compression.csv"), category="2. Processing",
-                           subcategory="Metadata compression"),
+        # Plain CSVs, not report()-flagged — the interactive datavzrd bundle
+        # below (rule datavzrd_processing) is what gets embedded in the HTML
+        # report, same split as workflows/preprocessing/Snakefile.
+        timings=str(REP / "timings.csv"),
+        compression=str(REP / "compression.csv"),
     conda:
         "../../envs/report.yaml"
     params:
@@ -278,6 +281,34 @@ rule collect_run_stats:
         python scripts/collect_run_stats.py --systems {params.systems} \
           --abcfold-root {ABC} --metadata-root {META} \
           --timings {output.timings} --compression {output.compression}
+        """
+
+
+# ── interactive tables — datavzrd bundle embedded in the .zip report ───────
+# Plain report(csv) rendering (the old behavior) shows up tiny and unstyled
+# next to preprocessing's datavzrd tables; route through the same wrapper
+# used there for consistent, sortable/searchable rendering.
+rule datavzrd_processing:
+    input:
+        config=str(REPO / "report" / "datavzrd" / "processing.datavzrd.yaml"),
+        css=str(REPO / "scripts" / "datavzrd-dark.css"),
+        timings=str(REP / "timings.csv"),
+        compression=str(REP / "compression.csv"),
+    output:
+        report(directory(str(REP / "tables")),
+               category="2. Processing", subcategory="Interactive tables",
+               htmlindex="index.html"),
+    conda:
+        "../../envs/report.yaml"
+    log:
+        str(LOG / "datavzrd" / "processing.log"),
+    shell:
+        r"""
+        (
+          cd "$(dirname {input.timings})" \
+            && datavzrd "{input.config}" --overwrite-output --output tables
+        ) > {log} 2>&1
+        python scripts/style_datavzrd.py {output[0]} {input.css} >> {log} 2>&1
         """
 
 

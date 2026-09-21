@@ -1,0 +1,54 @@
+name: "Processing tables"
+
+default-view: timings
+
+datasets:
+  timings:
+    path: "timings.csv"
+    separator: ","
+  compression:
+    path: "compression.csv"
+    separator: ","
+
+views:
+  timings:
+    dataset: timings
+    desc: |
+      Per-backend model yield for each system. `wall_clock` comes from
+      `sacct` (blank off-cluster); `note` carries a failure signature
+      (token cap / OOM / segfault / traceback) grepped from the run log
+      when a backend produced no models.
+    render-table:
+      columns:
+        system:
+          label: "system"
+        backend:
+          label: "backend"
+        n_models:
+          label: "models"
+        status:
+          label: "status"
+        wall_clock:
+          label: "wall clock"
+        note:
+          label: "note"
+
+  compression:
+    dataset: compression
+    desc: |
+      Metadata compression per system: raw ABCfold output vs. the
+      compressed parquet/h5 store, and disk freed by `--delete-originals`.
+    render-table:
+      columns:
+        system:
+          label: "system"
+        raw_mb:
+          label: "raw MB"
+        stored_mb:
+          label: "stored MB"
+        ratio:
+          label: "ratio"
+        freed_mb:
+          label: "freed MB"
+        abcfold_remaining_mb:
+          label: "ABCfold remaining MB"

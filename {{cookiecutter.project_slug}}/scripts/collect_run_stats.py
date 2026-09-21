@@ -75,9 +75,9 @@ def timings(systems, meta_root: Path, log_root: Path, out: Path) -> None:
             df = pd.read_parquet(pq, columns=["backend"])
             counts = df["backend"].value_counts().to_dict()
         wall = _sacct_wall(s)
-        backends = counts or {b: 0 for b in
-                              ["alphafold3", "boltz", "chai1", "openfold3",
-                               "protenix", "rosettafold3"]}
+        backends = {b: counts.get(b, 0) for b in
+                    ["alphafold3", "boltz", "chai1", "openfold3",
+                     "protenix", "rosettafold3"]}
         for b, n in sorted(backends.items()):
             rows.append({
                 "system": s, "backend": b, "n_models": int(n),
@@ -90,8 +90,12 @@ def timings(systems, meta_root: Path, log_root: Path, out: Path) -> None:
     print(f"[run_stats] timings -> {out} ({len(rows)} rows)")
 
 
+# Matches the per-system totals line compress_abcfold_metadata.py prints at
+# the end of its run, e.g.:
+#   [compress] 5/5 run(s) converted. Raw arrays: 0.14GB -> stored: 0.03GB, freed: 0.11GB
+# (there is no literal "ratio" in that output — it's derived here instead).
 _RAW_RE = re.compile(
-    r"([\d.]+)MB raw -> ([\d.]+)MB .*?ratio\s*([\d.]+)?", re.IGNORECASE)
+    r"Raw arrays:\s*([\d.]+)GB\s*->\s*stored:\s*([\d.]+)GB", re.IGNORECASE)
 _FREED_RE = re.compile(r"freed:\s*([\d.]+)GB", re.IGNORECASE)
 
 
@@ -113,9 +117,9 @@ def compression(systems, abc_root: Path, meta_root: Path, log_root: Path, out: P
         if log:
             m = _RAW_RE.search(log)
             if m:
-                raw, stored = m.group(1), m.group(2)
-                ratio = m.group(3) or (
-                    round(float(raw) / float(stored), 1) if float(stored) else "")
+                raw = round(float(m.group(1)) * 1000, 1)
+                stored = round(float(m.group(2)) * 1000, 1)
+                ratio = round(raw / stored, 1) if stored else ""
             fm = _FREED_RE.search(log)
             if fm:
                 freed = round(float(fm.group(1)) * 1000, 1)

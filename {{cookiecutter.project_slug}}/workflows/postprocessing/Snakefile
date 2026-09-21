@@ -47,6 +47,7 @@ MET = CFG["metrics"]
 SEL = CFG["selection"]
 MZ = CFG["minimize"]
 RPT = CFG["report"]
+DATAVZRD = bool(RPT.get("datavzrd", False))
 CHIMERAX = CFG["chimerax_bin"]
 PLIP_IMAGE = CFG["plip_image"]
 FMTS = ",".join(RPT["figure_formats"])
@@ -75,6 +76,7 @@ rule all:
         [str(REP / s / "minimize_energy.svg") for s in SYSTEMS],
         [str(REP / s / f"plip_heatmaps_{p}.svg")
          for s in SYSTEMS for p in passes(s)],
+        ([str(REP / s / "tables") for s in SYSTEMS] if DATAVZRD else []),
 
 
 # ── 3a. anchor alignment + pose clustering ───────────────────────────────
@@ -316,9 +318,10 @@ rule fig_minimize_energy:
         svg=report(str(REP / "{system}" / "minimize_energy.svg"),
                    category="3. Postprocessing", subcategory="Minimization energy",
                    labels={"system": "{system}"}),
-        table=report(str(REP / "{system}" / "minimize_failure_rate.csv"),
-                     category="3. Postprocessing", subcategory="Minimization failure rate",
-                     labels={"system": "{system}"}),
+        # Plain CSV, not report()-flagged — the interactive datavzrd bundle
+        # below (rule datavzrd_postprocessing) is what gets embedded in the
+        # HTML report, same split as the preprocessing/processing Snakefiles.
+        table=str(REP / "{system}" / "minimize_failure_rate.csv"),
     conda:
         "../../envs/report.yaml"
     params:
@@ -328,6 +331,31 @@ rule fig_minimize_energy:
         python scripts/plot_minimize_energy.py --system {wildcards.system} \
           --results-root {POST} --max-abs-energy {params.maxe} \
           --out {output.svg} --out-table {output.table} --formats {params.fmts}
+        """
+
+
+# ── interactive tables — datavzrd bundle embedded in the .zip report ───────
+rule datavzrd_postprocessing:
+    input:
+        config=str(REPO / "report" / "datavzrd" / "postprocessing.datavzrd.yaml"),
+        css=str(REPO / "scripts" / "datavzrd-dark.css"),
+        table=str(REP / "{system}" / "minimize_failure_rate.csv"),
+    output:
+        report(directory(str(REP / "{system}" / "tables")),
+               category="3. Postprocessing", subcategory="Interactive tables",
+               labels={"system": "{system}"},
+               htmlindex="index.html"),
+    conda:
+        "../../envs/report.yaml"
+    log:
+        str(LOG / "datavzrd" / "{system}.log"),
+    shell:
+        r"""
+        (
+          cd "$(dirname {input.table})" \
+            && datavzrd "{input.config}" --overwrite-output --output tables
+        ) > {log} 2>&1
+        python scripts/style_datavzrd.py {output[0]} {input.css} >> {log} 2>&1
         """
 
 

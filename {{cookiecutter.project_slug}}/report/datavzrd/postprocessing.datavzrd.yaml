@@ -1,0 +1,29 @@
+name: "Postprocessing tables"
+
+default-view: minimize_failure_rate
+
+datasets:
+  minimize_failure_rate:
+    path: "minimize_failure_rate.csv"
+    separator: ","
+
+views:
+  minimize_failure_rate:
+    dataset: minimize_failure_rate
+    desc: |
+      Per-backend ChimeraX minimization outcome: how many selected models
+      diverged (`|final energy| > max_abs_energy`) or ended up NaN.
+      A backend with no models selected for this system has no row here —
+      there was nothing to minimize.
+    render-table:
+      columns:
+        backend:
+          label: "backend"
+        n_models:
+          label: "models minimized"
+        n_diverged:
+          label: "diverged"
+        n_nan:
+          label: "NaN energy"
+        frac_failed:
+          label: "failure rate"
