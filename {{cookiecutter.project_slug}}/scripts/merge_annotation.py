@@ -67,7 +67,15 @@ def _chain_segments(cid, seqlen, dom_hits, dis_rows, morf_segs, acfg):
     for r in dis_rows:
         by_res[int(r["resi"])][r["track"]] = float(r["score"])
     cutoff = acfg["consensus"]["disorder_cutoff"]
-    need = acfg["consensus"]["disorder_min_tracks"]
+    n_avail = len({r["track"] for r in dis_rows})
+    # Cap at however many tracks actually ran: IUPred3/ANCHOR2/AIUPred are
+    # academic-gated (not on PyPI) so a fresh checkout usually only has
+    # metapredict. disorder_min_tracks (default 2) would then be
+    # unsatisfiable forever, silently pinning disordered_fraction at 0.0 and
+    # every gap at kind: linker regardless of actual scores. Mirrors
+    # plot_disorder.py's own shading, which already uses a majority of
+    # whatever tracks are present rather than a fixed count.
+    need = min(acfg["consensus"]["disorder_min_tracks"], max(n_avail, 1))
     mask = {i for i in range(1, seqlen + 1)
             if sum(1 for v in by_res.get(i, {}).values() if v >= cutoff) >= need}
 
