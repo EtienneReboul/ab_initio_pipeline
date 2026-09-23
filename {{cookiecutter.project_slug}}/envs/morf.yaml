@@ -8,9 +8,14 @@ channels:
 dependencies:
   - python=3.11
   - pytorch>=2.1
-  - cpuonly
+  # cpuonly dropped: it's a pytorch-channel-only metapackage, not on
+  # conda-forge (PackagesNotFoundInChannelsError) — conda-forge's pytorch
+  # build has no CUDA variant on macOS anyway, so it was a no-op there, and
+  # elsewhere this env still gets a working (if not CPU-pinned) pytorch.
   - numpy>=1.26
   - pandas>=2.0
+  - pyyaml>=6.0   # lib_pipeline.py imports yaml; missing here broke annotate_morf
+  - requests>=2.31   # tools/AFF/miscellaneous.py (imported by tools/MC2/MC2.py) needs it
   - pip
   - pip:
       - crc64iso

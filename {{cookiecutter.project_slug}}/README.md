@@ -114,8 +114,11 @@ against a live PBS/Torque or HTCondor pool. Known gaps if you try one:
   `pbs-extra-qsub-args` GPU request in the profile, which is very
   site-specific and left as a commented placeholder.
 - **HTCondor** — via the official `snakemake-executor-plugin-htcondor`
-  (`envs/controller.yaml` installs it unconditionally — safe, official
-  package). Assumes a shared filesystem between submit and execute nodes by
+  (**not** installed by `envs/controller.yaml` — its `htcondor` dependency
+  ships no macOS wheel, so installing it unconditionally broke `conda env
+  create` on a Mac controller host; install it yourself with `pip install
+  snakemake-executor-plugin-htcondor` if `hpc.scheduler` is `htcondor`).
+  Assumes a shared filesystem between submit and execute nodes by
   default; opportunistic pools without one (OSG/CHTC-style) need
   `shared-fs-usage` tuned and file transfer configured — see the comments
   in `workflows/processing/profiles/htcondor/config.yaml`. `hpc.account`

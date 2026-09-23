@@ -7,8 +7,13 @@ name: ab-initio-pipeline
 #   slurm     — snakemake-executor-plugin-slurm, installed below (validated
 #               on IFB; this is the only scheduler this pipeline has
 #               actually been run against).
-#   htcondor  — snakemake-executor-plugin-htcondor, also installed below
-#               (official package, harmless to install even if unused).
+#   htcondor  — NOT installed here: snakemake-executor-plugin-htcondor pulls
+#               in the `htcondor` Python package, which ships no macOS wheel
+#               (Linux-only compiled bindings) — `conda env create` fails
+#               outright on a Mac controller host even though the job itself
+#               would only ever run on Linux submit nodes. Install it
+#               yourself if hpc.scheduler is "htcondor":
+#                 pip install snakemake-executor-plugin-htcondor
 #   pbs       — NOT installed here: snakemake-executor-plugin-pbs isn't on
 #               PyPI yet (as of 2026-09), and pulling an unreleased,
 #               unofficial package straight from GitHub into this shared
@@ -36,4 +41,3 @@ dependencies:
   - pip
   - pip:
       - snakemake-executor-plugin-slurm     # in case bioconda lags
-      - snakemake-executor-plugin-htcondor

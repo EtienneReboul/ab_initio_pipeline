@@ -19,8 +19,15 @@ Missing optional tools are simply skipped — the stage still completes.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
+
+# metapredict's pip/PyPI torch wheel bundles its own libomp.dylib, which
+# conflicts with conda-forge numpy's libomp on macOS and aborts the process
+# (OMP Error #15) the moment `import metapredict` triggers torch's load.
+# Must be set before that import, not just before torch's own import.
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib_pipeline import REPO_ROOT, load_config, load_system, protein_chains  # noqa: E402
