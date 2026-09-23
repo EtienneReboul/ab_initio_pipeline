@@ -6,8 +6,9 @@ Dimensionality-reduction panels of the anchor-aligned partner-Ca pose
 vectors (results/<system>/aligned_partner_ca.npy). A configurable set of
 methods {pca, umap, tsne, mds}, each rendered twice:
 
-  row 1 — coloured by ABCfold backend, marker size by a rescoring metric
-          (iLIS by default, from interface_metrics.parquet)
+  row 1 — marker shape = ABCfold backend, marker color = a rescoring
+          metric (iLIS by default, from interface_metrics.parquet), with
+          a shared colorbar
   row 2 — coloured by pose cluster (pose_clusters.csv)
 
 One SVG grid.
@@ -68,19 +69,24 @@ def main() -> int:
                  .mean().reset_index())
         key = pc.merge(agg, on=["backend", "seed", "sample_index"], how="left")
         metric_vals = key[a.metric].to_numpy()
-    sizes = 20 + 120 * np.nan_to_num(
-        (metric_vals - np.nanmin(metric_vals)) /
-        (np.nanmax(metric_vals) - np.nanmin(metric_vals) + 1e-9))
+    vmin = float(np.nanmin(metric_vals)) if np.isfinite(metric_vals).any() else 0.0
+    vmax = float(np.nanmax(metric_vals)) if np.isfinite(metric_vals).any() else 1.0
+    if vmin == vmax:
+        vmax = vmin + 1e-9
+
+    MARKERS = ["o", "s", "^", "D", "v", "P", "X", "*"]
 
     methods = [m.strip() for m in a.methods.split(",") if m.strip()]
     fig, axes = plt.subplots(2, len(methods),
                              figsize=(3.6 * len(methods), 7), squeeze=False,
                              constrained_layout=True)
     backends = sorted(pc["backend"].unique())
-    bcol = {b: plt.get_cmap("tab10")(i) for i, b in enumerate(backends)}
+    bmark = {b: MARKERS[i % len(MARKERS)] for i, b in enumerate(backends)}
     clusters = sorted(pc["cluster"].unique())
     ccol = {c: plt.get_cmap("tab20")(i) for i, c in enumerate(clusters)}
+    cmap = plt.get_cmap("viridis")
 
+    last_sc = None
     for j, m in enumerate(methods):
         try:
             E = embed(X, m)
@@ -91,9 +97,11 @@ def main() -> int:
             continue
         for b in backends:
             s = (pc["backend"] == b).to_numpy()
-            axes[0][j].scatter(E[s, 0], E[s, 1], s=sizes[s], color=bcol[b],
-                               alpha=.8, edgecolor="white", lw=.3, label=b)
-        axes[0][j].set_title(f"{m} — backend / size∝{a.metric}", fontsize=9)
+            last_sc = axes[0][j].scatter(
+                E[s, 0], E[s, 1], marker=bmark[b], c=metric_vals[s],
+                cmap=cmap, vmin=vmin, vmax=vmax, s=42, alpha=.9,
+                edgecolor="white", lw=.3, label=b)
+        axes[0][j].set_title(f"{m} — shape=backend, color={a.metric}", fontsize=9)
         for c in clusters:
             s = (pc["cluster"] == c).to_numpy()
             axes[1][j].scatter(E[s, 0], E[s, 1], s=26, color=ccol[c],
@@ -101,8 +109,18 @@ def main() -> int:
         axes[1][j].set_title(f"{m} — pose cluster", fontsize=9)
         for r in (0, 1):
             axes[r][j].set_xticks([]); axes[r][j].set_yticks([])
-    axes[0][0].legend(fontsize=6, frameon=False, loc="best")
+
+    from matplotlib.lines import Line2D
+    shape_handles = [Line2D([0], [0], marker=bmark[b], linestyle="none",
+                            markerfacecolor="0.6", markeredgecolor="white",
+                            markersize=7, label=b) for b in backends]
+    axes[0][0].legend(handles=shape_handles, fontsize=6, frameon=False, loc="best")
     axes[1][0].legend(fontsize=6, frameon=False, loc="best")
+    if last_sc is not None:
+        cb = fig.colorbar(last_sc, ax=axes[0, :].tolist(), fraction=0.025,
+                          pad=0.02)
+        cb.ax.tick_params(labelsize=6)
+        cb.set_label(a.metric, fontsize=7)
     fig.suptitle(f"{a.system}: pose-vector dimensionality reduction")
 
     out = Path(a.out)

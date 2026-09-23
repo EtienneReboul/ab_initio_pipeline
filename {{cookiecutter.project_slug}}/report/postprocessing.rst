@@ -8,8 +8,9 @@ aligned on its rigid anchor and analysed.
   iterative rigid-core superposition, and the partner-chain mobility trim
   that defines the pose feature vector.
 * **Dimensionality reduction** — PCA / UMAP / t-SNE / MDS of the anchor-aligned
-  partner-Cα pose vectors, coloured by ABCfold backend (marker size ∝ a
-  rescoring metric) and by pose cluster.
+  partner-Cα pose vectors: marker shape = ABCfold backend, marker color = a
+  rescoring metric (shared colorbar), and a second panel coloured by pose
+  cluster.
 * **Interface metrics** — ipSAE, iLIS and Pinc computed for every model in the
   ensemble from its PAE matrix (``interface_metrics.parquet``).
 * **Minimization energy** — ChimeraX energy traces per selected model and a
