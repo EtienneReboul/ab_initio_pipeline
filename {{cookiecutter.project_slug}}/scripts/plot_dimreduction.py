@@ -92,30 +92,30 @@ def load_metric(metric, base, metadata_root, system, pc):
         # rather than re-merging model_metadata.parquet, which would collide
         # on the column name and get pandas-suffixed (ptm_x/ptm_y) instead.
         return pc[metric].to_numpy()
+    # cif_path is the one column guaranteed unique-per-model in every one of
+    # these tables. (backend, seed, sample_index) looked like a natural join
+    # key but isn't: OpenFold3 stores sample_index as NaN for all 5 diffusion
+    # samples of a seed, in *both* pose_clusters.csv and model_metadata.parquet
+    # — not just a mismatch between them — so joining on it either silently
+    # collapses OpenFold3's 5 samples per seed into one averaged value (via
+    # groupby+mean) or, worse, fans a merge out entirely (raw merge) and
+    # crashes on the shape mismatch. cif_path sidesteps both failure modes.
+    if not {"cif_path"}.issubset(pc.columns):
+        return np.full(n, np.nan)
     if metric in INTERFACE_METRICS:
         mpath = base / "interface_metrics.parquet"
-        if not mpath.exists() or not {"backend", "seed", "sample_index"}.issubset(pc.columns):
+        if not mpath.exists():
             return np.full(n, np.nan)
         im = pd.read_parquet(mpath)
-        agg = (im.groupby(["backend", "seed", "sample_index"])[metric]
-                 .mean().reset_index())
-        key = pc.merge(agg, on=["backend", "seed", "sample_index"], how="left")
+        agg = im.groupby("cif_path")[metric].mean().reset_index()
+        key = pc.merge(agg, on="cif_path", how="left")
         return key[metric].to_numpy()
     if metric in MODEL_METRICS:
         mpath = Path(metadata_root) / system / "model_metadata.parquet"
-        if not mpath.exists() or not {"backend", "seed", "sample_index"}.issubset(pc.columns):
+        if not mpath.exists():
             return np.full(n, np.nan)
-        mm = pd.read_parquet(mpath)
-        # (backend, seed, sample_index) isn't a unique key for every backend
-        # — e.g. OpenFold3 stores sample_index as NaN for all 5 diffusion
-        # samples of a seed, so a plain merge fans out (crashes downstream
-        # on the row-count mismatch). groupby+mean collapses those instead
-        # of fanning out, same as the INTERFACE_METRICS path above; coarser
-        # (seed-level-averaged) for whichever backend doesn't have a real
-        # per-sample index, rather than wrong-shaped.
-        agg = (mm.groupby(["backend", "seed", "sample_index"])[metric]
-                 .mean().reset_index())
-        key = pc.merge(agg, on=["backend", "seed", "sample_index"], how="left")
+        mm = pd.read_parquet(mpath)[["cif_path", metric]]
+        key = pc.merge(mm, on="cif_path", how="left")
         return key[metric].to_numpy()
     raise ValueError(f"unknown metric {metric!r} (not in INTERFACE_METRICS or MODEL_METRICS)")
 
