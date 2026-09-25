@@ -52,6 +52,15 @@ CHIMERAX = CFG["chimerax_bin"]
 PLIP_IMAGE = CFG["plip_image"]
 FMTS = ",".join(RPT["figure_formats"])
 
+# Confidence-metric tabs for fig_dimreduction (one dimreduction_<metric>.svg
+# per entry, browsable like the msa_coverage_{chain} tabs). ilis/pinc/ipsae/
+# pdockq/pdockq2 come from interface_metrics.parquet (chain-pair rows,
+# averaged per model); ptm/iptm/ranking_score/mean_plddt are the backend's
+# own per-model scores from model_metadata.parquet. Raw lis/clis omitted —
+# ilis (their geometric mean) is the one meant to be read directly.
+DIMR_METRICS = ["ipsae", "ilis", "pinc", "pdockq", "pdockq2",
+                "ptm", "iptm", "ranking_score", "mean_plddt"]
+
 
 def passes(system):
     return {p["name"]: p for p in SPECS[system]["plip_passes"]}
@@ -72,7 +81,7 @@ rule all:
         [str(POST / s / "interface_metrics.parquet") for s in SYSTEMS],
         [str(POST / s / f"all_selected_summary_{p}.csv")
          for s in SYSTEMS for p in passes(s)],
-        [str(REP / s / "dimreduction.svg") for s in SYSTEMS],
+        [str(REP / s / f"dimreduction_{m}.svg") for s in SYSTEMS for m in DIMR_METRICS],
         [str(REP / s / "minimize_energy.svg") for s in SYSTEMS],
         [str(REP / s / f"plip_heatmaps_{p}.svg")
          for s in SYSTEMS for p in passes(s)],
@@ -293,18 +302,22 @@ rule fig_dimreduction:
         npy=str(POST / "{system}" / "aligned_partner_ca.npy"),
         pc=str(POST / "{system}" / "pose_clusters.csv"),
         im=str(POST / "{system}" / "interface_metrics.parquet"),
+        mm=str(META / "{system}" / "model_metadata.parquet"),
     output:
-        report(str(REP / "{system}" / "dimreduction.svg"),
+        report(str(REP / "{system}" / "dimreduction_{metric}.svg"),
                category="3. Postprocessing", subcategory="Dimensionality reduction",
-               labels={"system": "{system}"}),
+               labels={"system": "{system}", "metric": "{metric}"}),
     conda:
         "../../envs/align_cluster.yaml"
     params:
         methods=",".join(CL["dimreduction"]), fmts=FMTS,
+    wildcard_constraints:
+        metric="|".join(DIMR_METRICS),
     shell:
         r"""
         python scripts/plot_dimreduction.py --system {wildcards.system} \
-          --results-root {POST} --methods {params.methods} \
+          --results-root {POST} --metadata-root {META} \
+          --methods {params.methods} --metric {wildcards.metric} \
           --out {output[0]} --formats {params.fmts}
         """
 
