@@ -2,13 +2,18 @@
 """
 scripts/plot_plip_heatmaps.py — Stage 3 report figure
 ====================================================
-Contact-count heatmaps from a PLIP aggregate CSV
+Mean-contact heatmaps from a PLIP aggregate CSV
 (all_selected_summary_<pass>.csv: columns replica, model, resnr, restype,
 reschain, resnr_lig, restype_lig, reschain_lig, dist, interaction_type).
 
 Axes = domain names from configs/<system>.yaml `domains:` for protein
-chains, or `nt<resnr>` buckets for RNA/DNA chains. Cell = number of PLIP
-interactions between that receptor-domain and ligand-domain.
+chains, or `nt<resnr>` buckets for RNA/DNA chains. Cell = mean number of
+PLIP interactions between that receptor-domain and ligand-domain, per model
+in this panel's stratum (total contact rows for that domain pair / number
+of distinct models contributing to the panel) — NOT the raw pooled sum,
+which would just scale with how many models happen to be in a stratum
+(e.g. "total" pools every model, "backend=X" only that backend's) rather
+than reflecting how much of that domain pair's contact is typical.
 
 Strata (configurable): total | backend | cluster  — one heatmap each.
 `backend`/`cluster` are parsed from the `model` string (rank_NN_<backend>_
@@ -28,8 +33,13 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 import yaml  # noqa: E402
 
+# sample index is the literal string "nan" for OpenFold3 (it doesn't report
+# a per-sample index — see make_multimer_af3_input/lib_pipeline model naming);
+# without the |nan alternative this regex simply fails to match those rows,
+# silently dropping OpenFold3 from every backend= panel (it still appears
+# in "total", which doesn't group by the extracted backend).
 MODEL_RE = re.compile(r"_(alphafold3|boltz|chai1|openfold3|protenix|rosettafold3)_"
-                      r"seed(\d+)_sample([0-9.]+)")
+                      r"seed(\d+)_sample([0-9.]+|nan)")
 
 
 def domain_map(spec, chain, nt_bucket):
@@ -52,17 +62,23 @@ def one_heatmap(ax, df, rmap, lmap, title):
         ax.text(0.5, 0.5, "no contacts", ha="center", transform=ax.transAxes)
         ax.set_title(title, fontsize=8)
         return
+    # Denominator for the mean: how many distinct models contributed to
+    # THIS panel (already filtered to one backend/cluster by the caller),
+    # not how many contact rows exist — every model that reached PLIP shows
+    # up here at least once (a truly contact-free model wouldn't appear in
+    # the summary CSV at all), so this is the panel's real model count.
+    n_models = max(df["model"].nunique(), 1)
     df = df.assign(rdom=df.apply(lambda x: rmap.get(x["reschain"], lambda r: x["reschain"])(int(x["resnr"])), axis=1),
                    ldom=df.apply(lambda x: lmap.get(x["reschain_lig"], lambda r: x["reschain_lig"])(int(x["resnr_lig"])), axis=1))
     piv = df.pivot_table(index="rdom", columns="ldom", values="dist",
-                         aggfunc="count", fill_value=0)
+                         aggfunc="count", fill_value=0) / n_models
     im = ax.imshow(piv.values, cmap="magma", aspect="auto")
     ax.set_xticks(range(len(piv.columns))); ax.set_xticklabels(piv.columns, rotation=60, ha="right", fontsize=6)
     ax.set_yticks(range(len(piv.index))); ax.set_yticklabels(piv.index, fontsize=6)
-    ax.set_title(title, fontsize=8)
+    ax.set_title(f"{title}  (n={n_models})", fontsize=8)
     for (i, j), v in np.ndenumerate(piv.values):
         if v:
-            ax.text(j, i, int(v), ha="center", va="center", fontsize=5,
+            ax.text(j, i, f"{v:.2f}", ha="center", va="center", fontsize=5,
                     color="white" if v < piv.values.max() * 0.6 else "black")
     return im
 
@@ -123,7 +139,7 @@ def main() -> int:
         one_heatmap(axes[k // ncol][k % ncol], g, rmap, lmap, title)
     for k in range(len(panels), nrow * ncol):
         axes[k // ncol][k % ncol].axis("off")
-    fig.suptitle(f"{a.system}: PLIP domain×domain contact counts ({Path(a.summary).stem})")
+    fig.suptitle(f"{a.system}: PLIP domain×domain mean contacts per model ({Path(a.summary).stem})")
 
     out = Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
