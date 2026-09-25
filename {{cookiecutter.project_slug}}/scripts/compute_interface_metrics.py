@@ -204,7 +204,8 @@ def main() -> int:
             tci = h5.get(f"_topology/{be}/token_chain_ids")
             tri = h5.get(f"_topology/{be}/token_res_ids")
             aci = h5.get(f"_topology/{be}/atom_chain_ids")
-            api = None
+            api = h5.get(f"{key}/atom_plddt")
+            api = None if api is None else np.asarray(api[:], dtype=np.float32)
             tci = None if tci is None else np.array([x.decode() if isinstance(x, bytes) else str(x) for x in tci[:]])
             tri = None if tri is None else np.asarray(tri[:])
             aci = None if aci is None else np.array([x.decode() if isinstance(x, bytes) else str(x) for x in aci[:]])
