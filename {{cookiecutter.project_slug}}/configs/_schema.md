@@ -14,8 +14,21 @@ sequences:
   - {type: protein, id: B, name: MyPartner,  sequence: "MDEF…"}
   - {type: rna,     id: C, name: guide,      sequence: "ACGU…"}   # optional
   - {type: dna,     id: D, name: target,     sequence: "ACGT…"}   # optional
-  # type: ligand with a `ccd` or `smiles` key is also accepted (passed through
-  # to fold_input.json); ligands are ignored by annotation and pose clustering.
+  - {type: ligand,  id: E, name: bridge,     ccd: GLY}            # optional
+  # type: ligand takes exactly one of `ccd` (code or list of codes) or `smiles`
+  # (passed through to fold_input.json); ligands are ignored by annotation and
+  # pose clustering.
+
+# ── Covalent bonds (optional) ─────────────────────────────────────────────
+# -> fold_input.json `bondedAtomPairs`. [[chain, residue, atom], [chain,
+# residue, atom]], 1-based residue index within the chain, CCD atom names.
+# AF3 rejects polymer-polymer bonds, so each bond must touch a ligand chain
+# (bridge e.g. a Ub-Ub isopeptide through the donor's C-terminal GLY as a
+# ligand). Boltz/Chai-1/Protenix get them via ABCfold's converters;
+# OpenFold3 and RosettaFold3 silently drop them.
+bonds:
+  - [[A, 75, C], [E, 1, N]]
+  - [[E, 1, C], [B, 63, NZ]]
 
 # ── Rigid structural anchors for pose clustering ─────────────────────────
 # A LIST. Each anchor gets its own iterative rigid-core refinement and its

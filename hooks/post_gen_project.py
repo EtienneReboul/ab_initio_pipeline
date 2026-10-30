@@ -45,6 +45,16 @@ def drop_leftovers():
             p.unlink()
             print(f"  dropped {path} (not generic — see TEMPLATING.md)")
 
+    # Runtime dirs are gitignored, but cookiecutter copies the template's
+    # working tree, so any outputs from runs made inside the template
+    # (toy / old systems) would land in every new project. Start them empty.
+    for d in ("data", "results", "reports", "logs"):
+        p = ROOT / d
+        if p.is_dir():
+            for child in p.iterdir():
+                shutil.rmtree(child) if child.is_dir() else child.unlink()
+            print(f"  emptied {d}/ (runtime outputs never carry over)")
+
 
 # ── 2. config.local.yaml — required, gitignored, never in config.yaml ───────
 def write_config_local():

@@ -67,11 +67,32 @@ def load_complex_spec(path: Path) -> dict:
     if "sequences" not in spec or not spec["sequences"]:
         raise ValueError(f"{path}: no 'sequences' entries found")
     for seq in spec["sequences"]:
-        if seq.get("type") not in ("protein", "rna"):
+        if seq.get("type") not in ("protein", "rna", "ligand"):
             raise ValueError(
                 f"{path}: unsupported sequence type {seq.get('type')!r} "
-                "(expected 'protein' or 'rna')"
+                "(expected 'protein', 'rna' or 'ligand')"
             )
+        if seq["type"] == "ligand" and ("ccd" in seq) == ("smiles" in seq):
+            raise ValueError(f"{path}: ligand {seq.get('id')!r} needs exactly one of 'ccd' / 'smiles'")
+
+    # Optional covalent bonds -> AF3 `bondedAtomPairs`. Each entry is
+    # [[chain, residue, atom], [chain, residue, atom]] (1-based residue
+    # index within the chain; atom names from the CCD). AF3 only supports
+    # bonds that involve a ligand — polymer-polymer bonds are rejected
+    # (docs/input.md "Bonds"), so e.g. an isopeptide between two protein
+    # chains has to be bridged through a single-residue ligand.
+    ids = {s["id"]: s["type"] for s in spec["sequences"]}
+    for bond in spec.get("bonds", []) or []:
+        if len(bond) != 2 or any(len(atom) != 3 for atom in bond):
+            raise ValueError(f"{path}: malformed bond {bond!r} (expected [[chain, res, atom], [chain, res, atom]])")
+        types = []
+        for chain, _res, _atom in bond:
+            if chain not in ids:
+                raise ValueError(f"{path}: bond {bond!r} references unknown chain {chain!r}")
+            types.append(ids[chain])
+        if "ligand" not in types:
+            raise ValueError(f"{path}: bond {bond!r} links two polymer chains — AF3 rejects this; "
+                             "bridge it through a ligand")
     return spec
 
 
@@ -93,20 +114,33 @@ def generate_seeds(strategy: str, n_replicas: int, seed_base: int,
 def build_fold_input(spec: dict, seeds: list[int], dialect: str, json_version: int) -> dict:
     sequences = []
     for seq in spec["sequences"]:
-        key = "protein" if seq["type"] == "protein" else "rna"
+        if seq["type"] == "ligand":
+            entry = {"id": [seq["id"]]}
+            if "ccd" in seq:
+                ccd = seq["ccd"]
+                entry["ccdCodes"] = ccd if isinstance(ccd, list) else [ccd]
+            else:
+                entry["smiles"] = seq["smiles"]
+            sequences.append({"ligand": entry})
+            continue
         sequences.append({
-            key: {
+            seq["type"]: {
                 "id": [seq["id"]],
                 "sequence": seq["sequence"],
             }
         })
-    return {
+    doc = {
         "name": spec["name"],
         "sequences": sequences,
         "modelSeeds": seeds,
         "dialect": dialect,
         "version": json_version,
     }
+    if spec.get("bonds"):
+        doc["bondedAtomPairs"] = [
+            [[str(c), int(r), str(a)] for c, r, a in bond] for bond in spec["bonds"]
+        ]
+    return doc
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
