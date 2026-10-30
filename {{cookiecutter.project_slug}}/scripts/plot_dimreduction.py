@@ -26,6 +26,11 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from report_theme import lazy_theme  # noqa: E402
+
+TH = lazy_theme()
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
@@ -154,6 +159,7 @@ def main() -> int:
     MARKERS = ["o", "s", "^", "D", "v", "P", "X", "*"]
 
     methods = [m.strip() for m in a.methods.split(",") if m.strip()]
+    TH.apply()
     fig, axes = plt.subplots(2, len(methods),
                              figsize=(3.6 * len(methods), 7), squeeze=False,
                              constrained_layout=True)
@@ -177,12 +183,12 @@ def main() -> int:
             last_sc = axes[0][j].scatter(
                 E[s, 0], E[s, 1], marker=bmark[b], c=metric_vals[s],
                 cmap=cmap, vmin=vmin, vmax=vmax, s=42, alpha=.9,
-                edgecolor="white", lw=.3, label=b)
+                edgecolor=TH.ink2, lw=.4, label=b)   # light edge: low-metric points stay visible on a dark surface
         axes[0][j].set_title(f"{m} — shape=backend, color={a.metric}", fontsize=9)
         for c in clusters:
             s = (pc["cluster"] == c).to_numpy()
             axes[1][j].scatter(E[s, 0], E[s, 1], s=26, color=ccol[c],
-                               alpha=.85, edgecolor="white", lw=.3, label=f"cl{c}")
+                               alpha=.85, edgecolor=TH.surface, lw=.3, label=f"cl{c}")
         axes[1][j].set_title(f"{m} — pose cluster", fontsize=9)
         for r in (0, 1):
             axes[r][j].set_xticks([]); axes[r][j].set_yticks([])
@@ -193,7 +199,7 @@ def main() -> int:
 
     from matplotlib.lines import Line2D
     shape_handles = [Line2D([0], [0], marker=bmark[b], linestyle="none",
-                            markerfacecolor="0.6", markeredgecolor="white",
+                            markerfacecolor=TH.ink2, markeredgecolor=TH.surface,
                             markersize=7, label=b) for b in backends]
     axes[0][0].legend(handles=shape_handles, fontsize=6, frameon=False, loc="best")
     axes[1][0].legend(fontsize=6, frameon=False, loc="best")
@@ -209,7 +215,7 @@ def main() -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     stem = out.with_suffix("")
     for fmt in a.formats.split(","):
-        fig.savefig(f"{stem}.{fmt.strip()}")
+        TH.save(fig, f"{stem}.{fmt.strip()}", bbox_inches="tight")
     plt.close(fig)
     print(f"[plot_dimreduction] {a.metric} -> {out}")
     return 0

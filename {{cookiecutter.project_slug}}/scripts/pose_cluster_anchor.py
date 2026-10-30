@@ -78,6 +78,9 @@ from sklearn.metrics import silhouette_score  # pyright: ignore[reportMissingImp
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib_pipeline import load_system  # noqa: E402
+from report_theme import lazy_theme  # noqa: E402
+
+TH = lazy_theme()
 
 
 # ── CLI ────────────────────────────────────────────────────────────────────────
@@ -418,15 +421,16 @@ def main():
     print(df["cluster"].value_counts().sort_index().rename("n_models"))
 
     # ── RMSF profile SVG (anchor core + partner trim, one panel each) ──────────
+    TH.apply()
     fig, (ax_anchor, ax_partner) = plt.subplots(2, 1, figsize=(9, 6.0))
 
     anchor_x = np.arange(anchor_frames.shape[1])
-    ax_anchor.plot(anchor_x, rmsf, color="#888888", lw=1, label="anchor RMSF")
+    ax_anchor.plot(anchor_x, rmsf, color=TH.ink2, lw=1, label="anchor RMSF")
     core_mask = np.isin(anchor_x, core_idx)
-    ax_anchor.scatter(anchor_x[core_mask], rmsf[core_mask], s=6, color="#C44E52", label="final rigid core")
+    ax_anchor.scatter(anchor_x[core_mask], rmsf[core_mask], s=6, color=TH.color("red"), label="final rigid core")
     for b in [i for i in range(1, len(ref_anchor_labels))
               if ref_anchor_labels[i][0] != ref_anchor_labels[i - 1][0]]:
-        ax_anchor.axvline(b, color="black", lw=0.6, ls=":")
+        ax_anchor.axvline(b, color=TH.ink, lw=0.6, ls=":")
     ax_anchor.set_xlabel(f"anchor residue index ({anchor_label} concatenated)")
     ax_anchor.set_ylabel("RMSF after core\nsuperposition (A)")
     ax_anchor.set_title(f"anchor ({anchor_label}) conservation across {n_used} models")
@@ -434,15 +438,15 @@ def main():
 
     partner_x = np.arange(n_partner_ca)
     partner_kept_mask = np.isin(partner_x, partner_core_idx)
-    ax_partner.plot(partner_x, partner_rmsf, color="#888888", lw=1, label="partner RMSF (anchor-frame)")
+    ax_partner.plot(partner_x, partner_rmsf, color=TH.ink2, lw=1, label="partner RMSF (anchor-frame)")
     ax_partner.scatter(partner_x[partner_kept_mask], partner_rmsf[partner_kept_mask],
-                        s=6, color="#4C72B0", label="kept (clustering feature vector)")
-    ax_partner.axhline(args.partner_rmsf_target, color="#C44E52", lw=0.8, ls="--",
+                        s=6, color=TH.color("domain"), label="kept (clustering feature vector)")
+    ax_partner.axhline(args.partner_rmsf_target, color=TH.color("red"), lw=0.8, ls="--",
                         label=f"target ({args.partner_rmsf_target}A)")
     # mark where the concatenated partner chain identity changes
     boundaries = [i for i in range(1, n_partner_ca) if ref_partner_labels[i][0] != ref_partner_labels[i - 1][0]]
     for b in boundaries:
-        ax_partner.axvline(b, color="black", lw=0.6, ls=":")
+        ax_partner.axvline(b, color=TH.ink, lw=0.6, ls=":")
     tick_pos, tick_lab = [], []
     start = 0
     for b in boundaries + [n_partner_ca]:
@@ -462,7 +466,7 @@ def main():
 
     fig.suptitle(f"{args.complex}: RMSF analysis ({n_used} models)")
     fig.tight_layout()
-    fig.savefig(out_dir / "rmsf_profile.svg")
+    TH.save(fig, out_dir / "rmsf_profile.svg")
     plt.close(fig)
 
     # ── Pose-cluster PCA scatter SVG (colored by cluster, marker by backend) ────
@@ -480,7 +484,7 @@ def main():
                 continue
             ax.scatter(pcs[sel.to_numpy(), 0], pcs[sel.to_numpy(), 1] if n_comp > 1 else np.zeros(sel.sum()),
                        color=cmap(int(cluster) % 10), marker=marker_of[backend],
-                       s=30, edgecolor="white", linewidth=0.4,
+                       s=30, edgecolor=TH.surface, linewidth=0.4,
                        label=f"cluster {cluster} / {backend}")
     ax.set_xlabel(f"PC1 ({pc1_var:.1%} var)")
     ax.set_ylabel(f"PC2 ({pc2_var:.1%} var)" if n_comp > 1 else "")
@@ -490,7 +494,7 @@ def main():
     )
     ax.legend(fontsize=6, frameon=False, ncol=2, loc="best")
     fig.tight_layout()
-    fig.savefig(out_dir / "pose_clusters_pca.svg")
+    TH.save(fig, out_dir / "pose_clusters_pca.svg")
     plt.close(fig)
 
     print(f"[pose_cluster] {args.complex}: SVGs written to {out_dir}")

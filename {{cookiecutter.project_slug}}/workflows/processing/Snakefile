@@ -31,7 +31,6 @@ matching config.yaml's hpc.scheduler:
 import sys
 from pathlib import Path
 
-from snakemake.exceptions import WorkflowError
 
 REPO = Path(workflow.basedir).parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
@@ -62,17 +61,6 @@ MODEL_FLAG = "-" + "".join(
      "openfold3": "o", "protenix": "p", "rosettafold3": "r"}[m]
     for m, on in ABCFG["models"].items() if on
 )
-
-# ── annotation-review gate ──────────────────────────────────────────────────
-_unreviewed = [s for s in SYSTEMS if not SPECS[s].get("annotation_reviewed")]
-if _unreviewed and not config.get("skip_annotation_gate"):
-    raise WorkflowError(
-        f"Systems with `annotation_reviewed: false`: {_unreviewed}\n"
-        "Review data/annotation/<system>/annotation.yaml, curate the `domains:` "
-        "block into configs/<system>.yaml, set `annotation_reviewed: true`, then "
-        "re-run (or --config skip_annotation_gate=true to override)."
-    )
-
 
 # ── per-system, per-scheduler resource resolvers ─────────────────────────────
 # Each rule's `resources:` block below declares every key across all three

@@ -6,10 +6,11 @@ Prepares everything ABCfold needs, plus sequence annotation.
   1a. prepare_fold_input   fold_input.json per system (AF3-dialect, every seed)
   1b. fetch_mmseqs2_msa    MSA + top-hit templates from the ColabFold MMseqs2
                             webserver, embedded -> fold_input.resolved.json
-  1c. annotate_domains     ScanProsite + InterProScan REST -> domains.raw.tsv
-      annotate_disorder    IUPred3 (long/short) + ANCHOR2 + AIUPred -> disorder.tsv
-      annotate_morf        MoRFchibi2 (tools/MC2) -> morf.tsv
-      merge_annotation     -> data/annotation/<sys>/annotation.yaml  (HUMAN REVIEW)
+  1c. annotate_domains     ScanProsite + InterPro API (by `uniprot:`; InterProScan
+                            REST fallback) -> domains.raw.tsv + features.json
+      annotate_disorder    AIUPred docker: disorder + binding (MoRF) + linker -> disorder.tsv
+      merge_annotation     InterPro representative domains -> data/annotation/<sys>/
+                            annotation.yaml (used as is by stage 3; no review step)
   1d. abcfold_input_stats  chains / residues / tokens / MSA depth / token-cap risk
   1e. report figures + interactive datavzrd tables + reports/preprocessing.html
       (the HTML is built by the onsuccess hook)
@@ -56,7 +57,6 @@ rule all:
         [str(ANN / s / "input_stats.tsv") for s in SYSTEMS],
         prot_figs("msa_coverage"),
         prot_figs("domain_bar"),
-        prot_figs("disorder"),
         [str(REP / s / "templates.csv") for s in SYSTEMS],
         [str(REP / s / "input_stats.csv") for s in SYSTEMS],
         ([str(REP / s / "tables") for s in SYSTEMS] if DATAVZRD else []),
@@ -119,6 +119,7 @@ rule annotate_domains:
         spec=str(REPO / "configs" / "{system}.yaml"),
     output:
         tsv=str(ANN / "{system}" / "domains.raw.tsv"),
+        features=str(ANN / "{system}" / "features.json"),
     log:
         str(LOG / "annotate_domains" / "{system}.log"),
     conda:
@@ -127,6 +128,7 @@ rule annotate_domains:
         r"""
         python scripts/annotate_domains.py \
           --system {wildcards.system} --spec {input.spec} --out {output.tsv} \
+          --features {output.features} \
           > {log} 2>&1
         """
 
@@ -148,33 +150,12 @@ rule annotate_disorder:
         """
 
 
-rule annotate_morf:
-    input:
-        spec=str(REPO / "configs" / "{system}.yaml"),
-    output:
-        tsv=str(ANN / "{system}" / "morf.tsv"),
-    log:
-        str(LOG / "annotate_morf" / "{system}.log"),
-    conda:
-        "../../envs/morf.yaml"
-    params:
-        thr=CFG["annotate"]["morfchibi"]["score_threshold"],
-        minlen=CFG["annotate"]["morfchibi"]["min_len"],
-    shell:
-        r"""
-        python scripts/annotate_morf.py \
-          --system {wildcards.system} --spec {input.spec} --out {output.tsv} \
-          --score-threshold {params.thr} --min-len {params.minlen} \
-          > {log} 2>&1
-        """
-
-
 rule merge_annotation:
     input:
         spec=str(REPO / "configs" / "{system}.yaml"),
         domains=str(ANN / "{system}" / "domains.raw.tsv"),
+        features=str(ANN / "{system}" / "features.json"),
         disorder=str(ANN / "{system}" / "disorder.tsv"),
-        morf=str(ANN / "{system}" / "morf.tsv"),
     output:
         yaml=str(ANN / "{system}" / "annotation.yaml"),
     log:
@@ -185,7 +166,7 @@ rule merge_annotation:
         r"""
         python scripts/merge_annotation.py \
           --system {wildcards.system} --spec {input.spec} \
-          --domains {input.domains} --disorder {input.disorder} --morf {input.morf} \
+          --domains {input.domains} --features {input.features} --disorder {input.disorder} \
           --out {output.yaml} \
           > {log} 2>&1
         """
@@ -237,29 +218,10 @@ rule fig_domain_bar:
     input:
         spec=str(REPO / "configs" / "{system}.yaml"),
         annotation=str(ANN / "{system}" / "annotation.yaml"),
+        disorder=str(ANN / "{system}" / "disorder.tsv"),
     output:
         report(str(REP / "{system}" / "domain_bar_{chain}.svg"),
-               category="1. Preprocessing", subcategory="Domain map",
-               labels={"system": "{system}", "chain": "{chain}"}),
-    conda:
-        "../../envs/report.yaml"
-    params:
-        fmts=",".join(CFG["report"]["figure_formats"]),
-    shell:
-        r"""
-        python scripts/plot_domain_bar.py \
-          --spec {input.spec} --annotation {input.annotation} --chain {wildcards.chain} \
-          --out {output[0]} --formats {params.fmts}
-        """
-
-
-rule fig_disorder:
-    input:
-        disorder=str(ANN / "{system}" / "disorder.tsv"),
-        morf=str(ANN / "{system}" / "morf.tsv"),
-    output:
-        report(str(REP / "{system}" / "disorder_{chain}.svg"),
-               category="1. Preprocessing", subcategory="Disorder / MoRF",
+               category="1. Preprocessing", subcategory="Domain map + disorder",
                labels={"system": "{system}", "chain": "{chain}"}),
     conda:
         "../../envs/report.yaml"
@@ -268,9 +230,10 @@ rule fig_disorder:
         cutoff=CFG["annotate"]["consensus"]["disorder_cutoff"],
     shell:
         r"""
-        python scripts/plot_disorder.py \
-          --disorder {input.disorder} --morf {input.morf} --chain {wildcards.chain} \
-          --cutoff {params.cutoff} --out {output[0]} --formats {params.fmts}
+        python scripts/plot_domain_bar.py \
+          --system {wildcards.system} --spec {input.spec} --annotation {input.annotation} \
+          --disorder {input.disorder} --chain {wildcards.chain} --cutoff {params.cutoff} \
+          --out {output[0]} --formats {params.fmts}
         """
 
 

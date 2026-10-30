@@ -15,11 +15,15 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from report_theme import lazy_theme  # noqa: E402
+
+TH = lazy_theme()
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
 BACKENDS = ["alphafold3", "boltz", "chai1", "openfold3", "protenix", "rosettafold3"]
-COLORS = ["#4c72b0", "#dd8452", "#55a868", "#c44e52", "#8172b3", "#937860"]
 
 
 def main() -> int:
@@ -39,13 +43,14 @@ def main() -> int:
             for j, b in enumerate(BACKENDS):
                 mat[i, j] = int(vc.get(b, 0))
 
+    TH.apply()
     fig, ax = plt.subplots(figsize=(1.6 + 1.3 * len(a.systems), 4),
                            constrained_layout=True)
     x = np.arange(len(a.systems))
     w = 0.8 / len(BACKENDS)
     for j, b in enumerate(BACKENDS):
         ax.bar(x + (j - len(BACKENDS) / 2) * w + w / 2, mat[:, j], w,
-               label=b, color=COLORS[j])
+               label=b, color=TH.series()[j % 8])
     ax.set_xticks(x)
     ax.set_xticklabels(a.systems, rotation=20, ha="right")
     ax.set_ylabel("models produced")
@@ -55,13 +60,13 @@ def main() -> int:
         for j in range(len(BACKENDS)):
             if mat[i, j] == 0:
                 ax.text(x[i] + (j - len(BACKENDS) / 2) * w + w / 2, 0.5, "0",
-                        ha="center", va="bottom", fontsize=6, color="#c44e52")
+                        ha="center", va="bottom", fontsize=6, color=TH.color("red"))
 
     out = Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     stem = out.with_suffix("")
     for fmt in a.formats.split(","):
-        fig.savefig(f"{stem}.{fmt.strip()}")
+        TH.save(fig, f"{stem}.{fmt.strip()}")
     plt.close(fig)
     print(f"[plot_backend_yield] -> {out}")
     return 0

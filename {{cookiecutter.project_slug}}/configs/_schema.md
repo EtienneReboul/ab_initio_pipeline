@@ -10,11 +10,19 @@ size_class: small          # key into config.yaml hpc.<scheduler>.size_classes {
 # ── Chains ────────────────────────────────────────────────────────────────
 # Order defines the fold_input.json chain order. ids must be unique A,B,C…
 sequences:
-  - {type: protein, id: A, name: MyReceptor, sequence: "MABC…"}
-  - {type: protein, id: B, name: MyPartner,  sequence: "MDEF…"}
+  - {type: protein, id: A, name: MyReceptor, uniprot: P12345, sequence: "MABC…"}
+  - {type: protein, id: B, name: MyPartner,  uniprot: Q67890, region: [1, 120], sequence: "MDEF…"}
   - {type: rna,     id: C, name: guide,      sequence: "ACGU…"}   # optional
   - {type: dna,     id: D, name: target,     sequence: "ACGT…"}   # optional
   - {type: ligand,  id: E, name: bridge,     ccd: GLY}            # optional
+  # uniprot (optional, protein): the UniProt entry this chain IS — stage 1 then
+  # reads InterPro's precomputed domains for it (fast, no email, carries the
+  # representative-domain flags). `region: [start, end]` (1-based, inclusive)
+  # when the chain is a slice of that entry; hits are projected onto it. Left
+  # out, it is found by locating the chain's sequence in the entry (when it
+  # occurs once — polyubiquitin repeats, for example, need it spelled out).
+  # Without it (or if the sequence doesn't match) InterProScan runs on the
+  # sequence itself (needs annotate.interproscan.email).
   # type: ligand takes exactly one of `ccd` (code or list of codes) or `smiles`
   # (passed through to fold_input.json); ligands are ignored by annotation and
   # pose clustering.
@@ -38,19 +46,15 @@ bonds:
 anchor_chains:  [A]
 partner_chains: [B]
 
-# ── Annotation review gate ──────────────────────────────────────────────
-# Stage 1 writes data/annotation/<system>/annotation.yaml for you to merge
-# into the `domains:` block below. Flip this to true once you've reviewed
-# it — stage 2 refuses to run for a system still set false.
-annotation_reviewed: false
-
-# ── Domain / region map (hand-curated from stage-1 annotation) ──────────
-# Per chain id, an ordered list of non-overlapping segments. `kind` is one
-# of: domain | linker | disordered | morf. 1-based, inclusive. Used by the
-# stage-3 PLIP domain×domain heatmaps and the energy/over-fold filter.
+# ── Domain / region map (OPTIONAL override) ────────────────────────────
+# Stage 1 writes the domain map stage 3 uses to data/annotation/<system>/
+# annotation.yaml: InterPro's representative domains, named after their
+# InterPro entries, the gaps between them split into disordered / linker by
+# AIUPred, plus AIUPred MoRFs. No review step. A chain listed here replaces
+# that chain's map (others keep theirs). Per chain, an ordered list of
+# non-overlapping segments; `kind` is one of: domain | linker | disordered |
+# morf. 1-based, inclusive. Used by the stage-3 PLIP domain×domain heatmaps.
 domains:
-  A:
-    - {name: dom1,  start: 1,   end: 76,  kind: domain}
   B:
     - {name: dom1,  start: 1,   end: 60,  kind: domain}
     - {name: tail,  start: 61,  end: 95,  kind: disordered}

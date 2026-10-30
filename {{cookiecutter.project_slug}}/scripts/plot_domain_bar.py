@@ -1,85 +1,264 @@
 #!/usr/bin/env python3
 """
 scripts/plot_domain_bar.py — Stage 1 report figure
-==================================================
-One horizontal residue bar per protein chain, split into coloured segments
-by `kind` (domain / linker / disordered / morf). Uses the hand-curated
-`domains:` block from configs/<system>.yaml when `annotation_reviewed:
-true`, otherwise the proposed block from data/annotation/<system>/annotation.yaml.
+=================================================
+One figure per protein chain, laid out like InterPro's protein viewer
+(ported from NanoPulldown, nanopulldown.report.plots.domain_bar):
+
+  AIUPred panel     disorder / binding / linker tracks (disorder.tsv; the
+                    metapredict fallback draws its disorder track alone)
+  Family            the protein's family (InterPro family entry, from PANTHER ...)
+  Domain map        the segments stage 3 uses (lib_pipeline.system_domains):
+                    the InterPro-based annotation, or a chain's hand-written
+                    `domains:` in configs/<system>.yaml — domain / linker / disordered
+  InterPro entries  one row per integrated InterPro entry (domain, repeat,
+                    homologous superfamily, site), with the member databases
+                    that agree on it
+  Unintegrated      member-database signatures no InterPro entry holds
+  Features          MobiDB-lite, coiled coil, signal peptide, TM helix
+                    (InterPro extra features) and AIUPred MoRFs
+
+Everything below the AIUPred panel comes from data/annotation/<system>/
+annotation.yaml (its `domains:` and `interpro:` blocks), so the figure needs
+no network. Row identity is written in the left margin (name + a grey line
+with accession and sources); colour encodes the entry type.
 """
 from __future__ import annotations
 
 import argparse
+import csv
+import sys
+from collections import defaultdict
 from pathlib import Path
 
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.patches as mpatches  # noqa: E402
-import matplotlib.pyplot as plt  # noqa: E402
-import yaml  # noqa: E402
+import matplotlib.patches as mpatches
+import matplotlib.pyplot as plt
+import yaml
 
-KIND_COLOR = {
-    "domain": "#4c72b0",
-    "linker": "#c7c7c7",
-    "disordered": "#dd8452",
-    "morf": "#55a868",
-}
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from lib_pipeline import chain_by_id, load_system  # noqa: E402
+from report_theme import lazy_theme  # noqa: E402
+
+# colours by role, from the report theme (report_theme.py; one hue per entry type)
+TH = lazy_theme()
+TYPE_COLOR = {k: TH.color(k) for k in
+              ("family", "domain", "homologous_superfamily", "repeat", "site", "unintegrated")}
+KIND_COLOR = {k: TH.region(k) for k in ("domain", "linker", "disordered")}
+TRACK_COLOR = {"disorder": TH.color("disorder"), "binding": TH.color("binding"),
+               "linker": TH.color("linker_track")}
+FEATURES = [("disorder", "MobiDB-lite", TH.color("disorder")), ("coils", "Coiled coil", TH.color("coils")),
+            ("signal_peptide", "Signal peptide", TH.color("signal_peptide")), ("tm", "TM helix", TH.color("tm"))]
+INK, INK2, RULE = TH.ink, TH.ink2, TH.rule
+
+AX_W_IN, LEFT_IN, FIG_W = 6.7, 2.95, 10.0     # fixed geometry: label fitting is computable
+ROW_IN = 0.30
+
+
+def protein_title(spec: dict, chain: str) -> str:
+    """'AGO1 — chain A (O04379, 1048 aa)'."""
+    c = chain_by_id(spec, chain) or {}
+    ids = [x for x in (c.get("uniprot"),) if x]
+    if c.get("region"):
+        ids.append("residues {}-{}".format(*c["region"]))
+    ids.append(f"{len(c.get('sequence', ''))} aa")
+    return f"{c.get('name') or 'chain ' + chain} — chain {chain}  ({', '.join(ids)})"
+
+
+def disorder_tracks(path: Path, chain: str) -> dict[str, list[float]]:
+    """{track: per-residue scores} of one chain from disorder.tsv."""
+    by: dict[str, dict[int, float]] = defaultdict(dict)
+    with path.open() as fh:
+        for r in csv.DictReader(fh, delimiter="\t"):
+            if r["chain"] == chain:
+                by[r["track"]][int(r["resi"])] = float(r["score"])
+    return {t: [v[i] for i in sorted(v)] for t, v in by.items()}
+
+
+def _fit(label: str | None, s: int, e: int, seqlen: int, size: float = 6.5) -> str | None:
+    """Label truncated to the bar's width, or None when fewer than 5 chars fit."""
+    if not label:
+        return None
+    n = int(((e - s + 1) / max(seqlen, 1)) * AX_W_IN * 72 / (size * 0.58))
+    if n >= len(label):
+        return label
+    return label[:n - 1] + "…" if n >= 5 else None
+
+
+def _bar(ax, y, s, e, color, seqlen, label=None, h=0.62, alpha=1.0):
+    ax.add_patch(mpatches.FancyBboxPatch(
+        (s, y - h / 2), e - s + 1, h, boxstyle="round,pad=0,rounding_size=2",
+        mutation_aspect=0.08, facecolor=color, alpha=alpha, edgecolor=TH.surface, lw=1.0))
+    t = _fit(label, s, e, seqlen)
+    if t:
+        ax.text((s + e) / 2, y, t, ha="center", va="center", fontsize=6.5, color="white")
+
+
+def _pack(items: list[dict]) -> list[list[dict]]:
+    """Greedy interval packing: overlapping bars of one track go to sub-rows."""
+    rows: list[list[dict]] = []
+    for it in sorted(items, key=lambda x: (x["start"], -x["end"])):
+        for r in rows:
+            if r[-1]["end"] + 3 < it["start"]:
+                r.append(it)
+                break
+        else:
+            rows.append([it])
+    return rows
+
+
+def _clip(text: str, n: int) -> str:
+    return text if len(text) <= n else text[:n - 1] + "…"
+
+
+def build_rows(segs: list[dict], ipr: dict, source_label: str) -> list[dict]:
+    """Track rows top to bottom: {label, sub, bars: [(s, e, color, text, h, alpha)], gap_before}."""
+    rows = []
+    fam = ipr.get("family") or []
+    for k, r in enumerate(_pack(fam)):
+        rows.append({"label": "Family" if k == 0 else "",
+                     "sub": " · ".join(ipr.get("family_sources") or []) if k == 0 else None,
+                     "bars": [(f["start"], f["end"], TYPE_COLOR["family"], f.get("name"), 0.62, 1.0)
+                              for f in r]})
+    rows.append({"label": "Domain map", "sub": source_label,
+                 "bars": [(d["start"], d["end"], KIND_COLOR.get(d["kind"], INK2),
+                           d["name"] if d["kind"] == "domain" else None, 0.78, 1.0)
+                          for d in segs if d["kind"] != "morf"]})
+    first = True
+    for e in ipr.get("entries") or []:
+        color = TYPE_COLOR.get(e.get("type"), INK2)
+        rows.append({"label": e["name"], "sub": " · ".join([e["accession"], *e.get("members", [])]),
+                     "bars": [(s, t, color, None, 0.5, 0.9) for s, t in e["locations"]],
+                     "header": "InterPro entries" if first else None})
+        first = False
+    for r in _pack(ipr.get("unintegrated") or []):
+        rows.append({"label": r[0]["name"] if len(r) == 1 else f"{len(r)} signatures",
+                     "sub": "unintegrated · " + " · ".join(f"{u['db']} {u['accession']}" for u in r),
+                     "bars": [(u["start"], u["end"], TYPE_COLOR["unintegrated"], None, 0.45, 1.0) for u in r]})
+    feats = ipr.get("features") or {}
+    first = True
+    for key, label, color in FEATURES:
+        if feats.get(key):
+            rows.append({"label": label, "sub": None, "gap": first,
+                         "bars": [(s, e, color, None, 0.35, 0.8) for s, e in feats[key]]})
+            first = False
+    morfs = [d for d in segs if d["kind"] == "morf"]
+    if morfs:
+        rows.append({"label": "MoRF (AIUPred)", "sub": None, "gap": first,
+                     "bars": [(d["start"], d["end"], TRACK_COLOR["binding"], None, 0.35, 0.8) for d in morfs]})
+    return rows
+
+
+def chain_segments(spec: dict, ann: dict, chain: str) -> tuple[list[dict], str]:
+    """(domain-map segments, their source label) of one chain: a hand-written
+    `domains:` entry when the config has one, else the annotation's map."""
+    curated = (spec.get("domains") or {}).get(chain)
+    if curated:
+        return curated, f"curated (configs/{spec['name']}.yaml)"
+    return (ann.get("domains") or {}).get(chain, []), "InterPro representative domains + AIUPred"
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--system", required=True)
     ap.add_argument("--spec", required=True)
     ap.add_argument("--annotation", required=True)
+    ap.add_argument("--disorder", default="", help="disorder.tsv (annotate_disorder.py)")
     ap.add_argument("--chain", required=True)
+    ap.add_argument("--title", default=None,
+                    help="figure title; default: chain name + UniProt accession + length")
+    ap.add_argument("--no-disorder", action="store_true", help="skip the AIUPred panel")
+    ap.add_argument("--cutoff", type=float, default=0.5)
     ap.add_argument("--out", required=True)
     ap.add_argument("--formats", default="svg")
     args = ap.parse_args()
 
-    spec = yaml.safe_load(Path(args.spec).read_text())
-    ann = yaml.safe_load(Path(args.annotation).read_text())
-    reviewed = spec.get("annotation_reviewed", False)
-    src = spec.get("domains") if reviewed else None
-    segs = (src or ann.get("domains", {})).get(args.chain, [])
-    source_label = "config (reviewed)" if (reviewed and src) else "auto-proposed (review needed)"
+    spec = load_system(args.system, Path(args.spec).resolve().parent.parent)
+    ann = yaml.safe_load(Path(args.annotation).read_text()) or {}
+    segs, source_label = chain_segments(spec, ann, args.chain)
+    ipr = (ann.get("interpro") or {}).get(args.chain) or {}
+    chain_seq = (chain_by_id(spec, args.chain) or {}).get("sequence", "")
+    seqlen = max([len(chain_seq)] + [int(d["end"]) for d in segs])
+    if args.no_disorder or not args.disorder:
+        args.no_disorder, tracks = True, {}
+    else:
+        tracks = disorder_tracks(Path(args.disorder), args.chain)
 
-    seqlen = 0
-    for s in spec.get("sequences", []):
-        if s.get("id") == args.chain:
-            seqlen = len(s.get("sequence", ""))
-    if segs:
-        seqlen = max(seqlen, max(int(d["end"]) for d in segs))
+    TH.apply()
+    rows = build_rows(segs, ipr, source_label)
+    n_extra = sum(0.6 for r in rows if r.get("header") or r.get("gap"))
+    top_in, aiu_in, gap_in, bot_in = 0.45, (0 if args.no_disorder else 1.35), 0.35, 0.75
+    trk_in = ROW_IN * (len(rows) + n_extra + 0.6)
+    H = top_in + aiu_in + (gap_in if aiu_in else 0) + trk_in + bot_in
+    fig = plt.figure(figsize=(FIG_W, H))
+    ax = fig.add_axes([LEFT_IN / FIG_W, bot_in / H, AX_W_IN / FIG_W, trk_in / H])
+    title = args.title or protein_title(spec, args.chain)
 
-    fig, ax = plt.subplots(figsize=(9, 1.9), constrained_layout=True)
-    ax.add_patch(mpatches.Rectangle((1, 0.0), max(seqlen, 1), 1.0,
-                                    facecolor="#f0f0f0", edgecolor="none"))
-    morfs = [d for d in segs if d["kind"] == "morf"]
-    for d in segs:
-        if d["kind"] == "morf":
-            continue
-        ax.add_patch(mpatches.Rectangle(
-            (int(d["start"]), 0.0), int(d["end"]) - int(d["start"]) + 1, 1.0,
-            facecolor=KIND_COLOR.get(d["kind"], "#999999"), edgecolor="white", lw=.6))
-        mid = (int(d["start"]) + int(d["end"])) / 2
-        if int(d["end"]) - int(d["start"]) > seqlen * 0.06:
-            ax.text(mid, 0.5, str(d["name"])[:18], ha="center", va="center",
-                    fontsize=7, color="white")
-    for d in morfs:                              # MoRFs as a thin overlay band
-        ax.add_patch(mpatches.Rectangle(
-            (int(d["start"]), 1.02), int(d["end"]) - int(d["start"]) + 1, 0.22,
-            facecolor=KIND_COLOR["morf"], edgecolor="none"))
+    if aiu_in:
+        axc = fig.add_axes([LEFT_IN / FIG_W, (bot_in + trk_in + gap_in) / H, AX_W_IN / FIG_W, aiu_in / H],
+                           sharex=ax)
+        plt.setp(axc.get_xticklabels(), visible=False)
+        if not tracks:
+            axc.text(0.5, 0.5, "no AIUPred tracks", ha="center", va="center", transform=axc.transAxes,
+                     color=INK2)
+        for t, vals in tracks.items():
+            vals = vals[:seqlen]
+            axc.plot(range(1, len(vals) + 1), vals, color=TRACK_COLOR.get(t, INK2), lw=1.2,
+                     ls="--" if t == "linker" else "-", label=t)
+        axc.axhline(args.cutoff, color=INK2, lw=0.6, ls=":")
+        axc.set_ylim(0, 1.05)
+        axc.set_ylabel("AIUPred score" if "binding" in tracks else "disorder score",
+                       fontsize=8, color=INK2)
+        if tracks:
+            axc.legend(loc="upper right", bbox_to_anchor=(-0.08, 1.0), fontsize=6.5, frameon=False,
+                       handlelength=1.6, borderaxespad=0.1)
+        axc.tick_params(labelsize=7, colors=INK2)
+        for sp in ("top", "right"):
+            axc.spines[sp].set_visible(False)
+        axc.set_title(title, fontsize=9, loc="left", color=INK)
+    else:
+        ax.set_title(title, fontsize=9, loc="left", color=INK)
 
-    ax.set_xlim(1, max(seqlen, 1)); ax.set_ylim(-0.1, 1.35)
-    ax.set_yticks([]); ax.set_xlabel("residue")
-    ax.set_title(f"chain {args.chain} domain map — {source_label}", fontsize=9)
-    ax.legend(handles=[mpatches.Patch(color=c, label=k) for k, c in KIND_COLOR.items()],
-              loc="upper center", bbox_to_anchor=(0.5, -0.45), ncol=4, frameon=False, fontsize=7)
+    tr = ax.get_yaxis_transform()
+    y = 0.0
+    for r in rows:
+        if r.get("header") or r.get("gap"):
+            y -= 0.3
+            if r.get("header"):
+                ax.text(-0.012, y + 0.5, r["header"], transform=tr, fontsize=7.5, color=INK,
+                        va="center", ha="right", fontweight="bold")
+            y -= 0.3
+        ax.axhline(y, color=RULE, lw=0.6, zorder=0)
+        for s, e, color, text, h, alpha in r["bars"]:
+            _bar(ax, y, int(s), int(e), color, seqlen, text, h, alpha)
+        dy = 0.17 if r.get("sub") else 0
+        if r["label"]:
+            ax.text(-0.012, y + dy, _clip(r["label"], 46), transform=tr, ha="right", va="center",
+                    fontsize=7, color=INK)
+        if r.get("sub"):
+            ax.text(-0.012, y - 0.24, _clip(r["sub"], 60), transform=tr, ha="right", va="center",
+                    fontsize=5.6, color=INK2)
+        y -= 1
+    ax.set_ylim(y + 0.4, 0.6)
+    ax.set_xlim(1, max(seqlen, 1))
+    ax.set_yticks([])
+    ax.tick_params(axis="x", labelsize=7, colors=INK2)
+    ax.set_xlabel("residue", fontsize=8, color=INK2)
+    for sp in ("top", "right", "left"):
+        ax.spines[sp].set_visible(False)
+
+    handles = [mpatches.Patch(color=c, label=k.replace("_", " ")) for k, c in TYPE_COLOR.items()]
+    handles += [mpatches.Patch(color=KIND_COLOR["disordered"], label="disordered region"),
+                mpatches.Patch(color=KIND_COLOR["linker"], label="linker")]
+    fig.legend(handles=handles, loc="lower center", ncol=8, frameon=False, fontsize=6.5,
+               bbox_to_anchor=(0.5 + (LEFT_IN - 0.3) / FIG_W / 2, 0.005), handlelength=1.2,
+               columnspacing=1.0)
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    stem = out.with_suffix("")
-    for fmt in args.formats.split(","):
-        fig.savefig(f"{stem}.{fmt.strip()}", bbox_inches="tight")
+    TH.save_all(fig, out, args.formats, png_dpi=150)
     plt.close(fig)
     print(f"[plot_domain_bar] -> {out}")
     return 0

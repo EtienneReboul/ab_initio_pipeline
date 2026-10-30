@@ -27,6 +27,9 @@ import numpy as np  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib_pipeline import norm_id  # noqa: E402
+from report_theme import lazy_theme  # noqa: E402
+
+TH = lazy_theme()
 
 
 def parse_a3m(a3m: str) -> list[str]:
@@ -63,9 +66,8 @@ def main() -> int:
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
 
+    TH.apply()
     fig, ax = plt.subplots(figsize=(8, 5), constrained_layout=True)
-    fig.patch.set_facecolor("white")
-    ax.set_facecolor("white")
 
     clean = parse_a3m(a3m) if a3m else []
     if len(clean) < 2:
@@ -93,7 +95,7 @@ def main() -> int:
         im = ax.imshow(np.ma.masked_invalid(lines), interpolation="nearest",
                         aspect="auto", cmap=cmap, vmin=0, vmax=1, origin="lower",
                         extent=(0.5, L + 0.5, 0, lines.shape[0]))
-        ax.plot(np.arange(1, L + 1), coverage, color="black", linewidth=1)
+        ax.plot(np.arange(1, L + 1), coverage, color=TH.ink, linewidth=1)
 
         ax.set_xlim(0.5, L + 0.5)
         ax.set_ylim(0, lines.shape[0])
@@ -106,8 +108,7 @@ def main() -> int:
 
     stem = out.with_suffix("")
     for fmt in args.formats.split(","):
-        fig.savefig(f"{stem}.{fmt.strip()}", facecolor="white",
-                    bbox_inches="tight")
+        TH.save(fig, f"{stem}.{fmt.strip()}", bbox_inches="tight")
     plt.close(fig)
     print(f"[plot_msa_coverage] -> {out}")
     return 0

@@ -377,6 +377,7 @@ rule fig_plip_heatmaps:
         summary=str(POST / "{system}" / "all_selected_summary_{pass_name}.csv"),
         pc=str(POST / "{system}" / "pose_clusters.csv"),
         spec=str(REPO / "configs" / "{system}.yaml"),
+        annotation=str(Path(DIRS["annotation"]) / "{system}" / "annotation.yaml"),
     output:
         report(str(REP / "{system}" / "plip_heatmaps_{pass_name}.svg"),
                category="3. Postprocessing", subcategory="PLIP heatmaps",

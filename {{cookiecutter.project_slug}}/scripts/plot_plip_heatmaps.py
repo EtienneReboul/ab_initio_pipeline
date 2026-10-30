@@ -6,8 +6,9 @@ Mean-contact heatmaps from a PLIP aggregate CSV
 (all_selected_summary_<pass>.csv: columns replica, model, resnr, restype,
 reschain, resnr_lig, restype_lig, reschain_lig, dist, interaction_type).
 
-Axes = domain names from configs/<system>.yaml `domains:` for protein
-chains, or `nt<resnr>` buckets for RNA/DNA chains. Cell = mean number of
+Axes = domain names from the system's domain map (lib_pipeline.system_domains:
+stage 1's InterPro-based annotation, overridden per chain by a `domains:`
+block in configs/<system>.yaml) for protein chains, or `nt<resnr>` buckets for RNA/DNA chains. Cell = mean number of
 PLIP interactions between that receptor-domain and ligand-domain, per model
 in this panel's stratum (total contact rows for that domain pair / number
 of distinct models contributing to the panel) — NOT the raw pooled sum,
@@ -23,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import sys
 from pathlib import Path
 
 import matplotlib
@@ -31,7 +33,12 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
-import yaml  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from lib_pipeline import load_system, system_domains  # noqa: E402
+from report_theme import lazy_theme  # noqa: E402
+
+TH = lazy_theme()
 
 # sample index is the literal string "nan" for OpenFold3 (it doesn't report
 # a per-sample index — see make_multimer_af3_input/lib_pipeline model naming);
@@ -42,8 +49,8 @@ MODEL_RE = re.compile(r"_(alphafold3|boltz|chai1|openfold3|protenix|rosettafold3
                       r"seed(\d+)_sample([0-9.]+|nan)")
 
 
-def domain_map(spec, chain, nt_bucket):
-    segs = (spec.get("domains") or {}).get(chain)
+def domain_map(spec, domains, chain, nt_bucket):
+    segs = domains.get(chain)
     if segs:
         def _lookup(resnr):
             for d in segs:
@@ -72,14 +79,15 @@ def one_heatmap(ax, df, rmap, lmap, title):
                    ldom=df.apply(lambda x: lmap.get(x["reschain_lig"], lambda r: x["reschain_lig"])(int(x["resnr_lig"])), axis=1))
     piv = df.pivot_table(index="rdom", columns="ldom", values="dist",
                          aggfunc="count", fill_value=0) / n_models
-    im = ax.imshow(piv.values, cmap="magma", aspect="auto")
+    # anchored at 0 so a single cell (or a flat panel) still reads as "this many", not as background
+    im = ax.imshow(piv.values, cmap=TH.cmap(), aspect="auto", vmin=0, vmax=max(piv.values.max(), 1e-9))
     ax.set_xticks(range(len(piv.columns))); ax.set_xticklabels(piv.columns, rotation=60, ha="right", fontsize=6)
     ax.set_yticks(range(len(piv.index))); ax.set_yticklabels(piv.index, fontsize=6)
     ax.set_title(f"{title}  (n={n_models})", fontsize=8)
     for (i, j), v in np.ndenumerate(piv.values):
         if v:
             ax.text(j, i, f"{v:.2f}", ha="center", va="center", fontsize=5,
-                    color="white" if v < piv.values.max() * 0.6 else "black")
+                    color=TH.cell_ink(v / max(piv.values.max(), 1e-9)))
     return im
 
 
@@ -95,7 +103,9 @@ def main() -> int:
     ap.add_argument("--formats", default="svg")
     a = ap.parse_args()
 
-    spec = yaml.safe_load(Path(a.spec).read_text())
+    spec = load_system(a.system, Path(a.spec).resolve().parent.parent)
+    domains = system_domains(spec, Path(a.spec).resolve().parent.parent)
+    TH.apply()
     df = pd.read_csv(a.summary)
     if df.empty:
         Path(a.out).parent.mkdir(parents=True, exist_ok=True)
@@ -116,7 +126,7 @@ def main() -> int:
         df["cluster"] = np.nan
 
     chains = sorted(set(df["reschain"]) | set(df["reschain_lig"]))
-    rmap = {c: domain_map(spec, c, a.nt_bucket) for c in chains}
+    rmap = {c: domain_map(spec, domains, c, a.nt_bucket) for c in chains}
     lmap = rmap
 
     strata = [s.strip() for s in a.strata.split(",") if s.strip()]

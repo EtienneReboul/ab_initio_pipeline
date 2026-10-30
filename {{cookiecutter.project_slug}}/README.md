@@ -29,10 +29,10 @@ No script edits.
 │  workflows/preprocessing/Snakefile          snakemake --use-conda --cores 2 │
 │                                                                            │
 │  fold_input.json ─► MMseqs2 MSA+templates ─► fold_input.resolved.json       │
-│  sequence annotation:  domains (ScanProsite + InterProScan REST)            │
-│                        disorder (IUPred3 long/short + ANCHOR2 + AIUPred)     │
-│                        MoRF (MoRFchibi2, tools/MC2)                          │
-│                     ─► data/annotation/<sys>/annotation.yaml  [HUMAN REVIEW] │
+│  sequence annotation:  domains (InterPro API by `uniprot:`, InterProScan   │
+│                        REST fallback; ScanProsite) -> representative set  │
+│                        disorder + MoRF + linker (AIUPred docker)          │
+│                     ─► data/annotation/<sys>/annotation.yaml  (used as is) │
 │  ─► reports/preprocessing.zip  (unzip → preprocessing/report.html)          │
 └────────────────────────────────┬───────────────────────────────────────────┘
                      rsync data/fold_inputs/  ►  IFB
@@ -140,8 +140,10 @@ conda env create -f envs/controller.yaml && conda activate ab-initio-pipeline
 
 # 2. STAGE 1 — local
 snakemake -s workflows/preprocessing/Snakefile --use-conda --cores 2
-#    review data/annotation/<system>/annotation.yaml, curate the `domains:` block
-#    into configs/<system>.yaml, set `annotation_reviewed: true`
+#    needs docker running (AIUPred image ghcr.io/doszilab/aiupred:cpu; without it
+#    disorder falls back to metapredict, no MoRFs). The domain map in
+#    data/annotation/<system>/annotation.yaml is used as is — no review step;
+#    a `domains:` block in configs/<system>.yaml overrides it per chain.
 
 # 3. STAGE 2 — on an IFB login node, after rsync-ing data/fold_inputs/
 #    (different SLURM cluster, or PBS/HTCondor? see "Running on IFB vs.
@@ -167,13 +169,13 @@ snakemake -s workflows/postprocessing/Snakefile --use-conda --cores 4
 |---|---|
 | `config.yaml` | all shared defaults, every stage |
 | `config.local.yaml` | per-machine / per-user overrides (gitignored; copy `.example`) |
-| `configs/<system>.yaml` | per-system chain spec + anchors + curated domains + PLIP passes |
+| `configs/<system>.yaml` | per-system chain spec (+ `uniprot:` per chain) + anchors + optional domain overrides + PLIP passes |
 | `envs/` | one conda env per rule group, built by `--use-conda` |
-| `tools/` | vendored: `MC2` (MoRFchibi2), `AFF`, `ipsae`, `afm_lis`, `pinc` |
+| `tools/` | vendored: `AFF`, `ipsae`, `afm_lis`, `pinc` |
 | `scripts/` | carried from the DRB2 pipeline + new (`lib_pipeline.py`, `annotate_*`, `compute_interface_metrics.py`, `cluster_poses.py`, plotters) |
 | `workflows/<stage>/Snakefile` | the three stage workflows |
 | `workflows/processing/profiles/<scheduler>/` | executor-plugin profile — `ifb` (slurm, validated), `pbs`, `htcondor` (both untested) |
-| `report/` | per-stage `.rst` captions, `custom.css` (dark theme), `datavzrd/*.datavzrd.yaml` table specs |
+| `report/` | per-stage `.rst` captions, `custom.css` (dark theme), `datavzrd/*.datavzrd.yaml` table specs; figure colours come from `scripts/report_theme.py` (`report.figure_theme: dark|light`) |
 | `data/ results/ logs/ reports/` | runtime outputs (gitignored) |
 
 ## Worked example

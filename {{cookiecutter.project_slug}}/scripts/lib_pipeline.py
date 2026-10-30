@@ -48,7 +48,6 @@ def load_system(name: str, repo_root: Path | str = REPO_ROOT) -> dict:
     """configs/<name>.yaml, with a few normalisations:
       - anchor_chains always a list (old configs used scalar anchor_chain)
       - partner_chains always a list
-      - annotation_reviewed defaults False
       - plip_passes falls back to a single 'main' pass built from a legacy
         top-level `plip:` block if present
     """
@@ -59,7 +58,6 @@ def load_system(name: str, repo_root: Path | str = REPO_ROOT) -> dict:
         spec["anchor_chains"] = [spec["anchor_chain"]]
     spec["anchor_chains"] = list(spec.get("anchor_chains", []))
     spec["partner_chains"] = list(spec.get("partner_chains", []))
-    spec.setdefault("annotation_reviewed", False)
     spec.setdefault("size_class", "small")
 
     if "plip_passes" not in spec:
@@ -118,6 +116,17 @@ def chain_by_id(spec: dict, cid: str) -> dict | None:
         if s.get("id") == cid:
             return s
     return None
+
+
+def system_domains(spec: dict, repo_root: Path | str = REPO_ROOT) -> dict[str, list[dict]]:
+    """{chain: segments} the downstream figures use: stage 1's InterPro-based
+    map (data/annotation/<system>/annotation.yaml), with any chain that has a
+    hand-written `domains:` entry in configs/<system>.yaml taking that instead."""
+    root = Path(repo_root)
+    ann_dir = load_config(root)["dirs"]["annotation"]
+    path = root / ann_dir / spec["name"] / "annotation.yaml"
+    auto = (yaml.safe_load(path.read_text()) or {}).get("domains", {}) if path.exists() else {}
+    return {**auto, **(spec.get("domains") or {})}
 
 
 def token_count(spec: dict) -> int:

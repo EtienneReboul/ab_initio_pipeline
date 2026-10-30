@@ -1,8 +1,8 @@
 name: ab-initio-annotate
-# Stage 1c sequence annotation — domains (ScanProsite + InterProScan REST),
-# disorder (IUPred3 + ANCHOR2 + AIUPred). MoRFchibi2 has its own env
-# (envs/morf.yaml) because it needs pytorch. All web-service / pip based, so
-# no local BLAST databases.
+# Stage 1c sequence annotation — domains (ScanProsite + InterPro API /
+# InterProScan REST). Disorder/MoRF come from AIUPred's docker image (run by
+# scripts/annotate_disorder.py, not installed here); metapredict is only its
+# no-docker fallback. All web-service / docker / pip based, so no local databases.
 channels:
   - conda-forge
   - bioconda
@@ -17,8 +17,4 @@ dependencies:
   - matplotlib>=3.8
   - pip
   - pip:
-      - metapredict>=3       # always-on disorder track (freely installable)
-      # IUPred3 / ANCHOR2 / AIUPred are academic-download gated (not on PyPI).
-      # To add those tracks: register + download, then either `pip install`
-      # the wheel here or drop the package under tools/iupred3/ , tools/aiupred/
-      # (scripts/annotate_disorder.py auto-detects both locations).
+      - metapredict>=3       # disorder fallback when docker / the AIUPred image is unavailable

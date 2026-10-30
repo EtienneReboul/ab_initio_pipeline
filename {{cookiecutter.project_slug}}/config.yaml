@@ -44,42 +44,43 @@ mmseqs2:
   save_raw: true               # keep the raw a3m + template-hit table for the stage-1 report
 
 # ── Stage 1c: sequence annotation (domains / disorder / MoRF) ────────────────
-# All run on the Mac in stage 1. Results are written to
-# data/annotation/<system>/ and a proposed merge into configs/<system>.yaml
-# is left at data/annotation/<system>/annotation.yaml for HUMAN REVIEW.
-# Downstream stages read the hand-curated `domains:` block in
-# configs/<system>.yaml, never the raw annotation directly.
+# All run on the Mac in stage 1, into data/annotation/<system>/. The domain
+# map (annotation.yaml) is InterPro's representative domain set, named after
+# its InterPro entries, gaps split by AIUPred disorder — stage 3 uses it as is.
+# A `domains:` block in configs/<system>.yaml overrides it chain by chain.
 annotate:
   prosite:
     scan_url: "https://prosite.expasy.org/cgi-bin/prosite/PSScan.cgi"
     skip_profiles: false       # false = include PROSITE profiles (PS50xxx), not just patterns
   interproscan:
-    email: ""                       # REQUIRED: set in config.local.yaml (EBI REST needs a
-                                     # contact address). Never commit a real address here.
+    # Fast path: InterPro's precomputed matches for a chain's `uniprot:` entry
+    # (one request, no email; carries the representative-domain flags).
+    api_url: "https://www.ebi.ac.uk/interpro/api"
+    # Fallback for chains without a matching `uniprot:` entry: InterProScan 5
+    # on the sequence itself (EBI REST, needs a contact email).
+    email: ""                       # set in config.local.yaml. Never commit a real address here.
     base_url: "https://www.ebi.ac.uk/Tools/services/rest/iprscan5"
     poll_s: 30
     # valid names: GET {base_url}/parameterdetails/appl — bad names auto-fall
     # back to the server default set (see scripts/annotate_domains.py).
     applications: ["PfamA", "SMART", "PrositeProfiles", "Gene3d", "MobiDBLite"]
-  metapredict:
-    enabled: true              # metapredict v3 (pip) — the always-on disorder track
-  iupred3:
-    # IUPred3 + ANCHOR2 are academic-download gated (not on PyPI). OPTIONAL:
-    # drop the downloaded package under tools/iupred3/ and these tracks are
-    # added automatically; absent, the stage still completes on metapredict.
-    types: ["long", "short"]
-  anchor2:
-    enabled: true
   aiupred:
-    # Also gated (aiupred.elte.hu). OPTIONAL: tools/aiupred/. The public REST
-    # endpoint returns 403, so there is no web fallback.
-    enabled: false
-  morfchibi:
-    score_threshold: 0.725     # MoRFchibi2 probability cutoff for calling a MoRF residue
+    # Disorder AND MoRF/binding propensity (and a linker track) in one docker
+    # run (replaces metapredict / IUPred3 / ANCHOR2 / MoRFchibi2). Falls back
+    # to metapredict (disorder only) when docker or the image is unavailable.
+    enabled: true
+    image_cpu: "ghcr.io/doszilab/aiupred:cpu"
+    image_gpu: "ghcr.io/doszilab/aiupred:gpu"
+    use_gpu: false
+    docker_platform: ""        # e.g. "linux/amd64" if the image has no build for this host
+    timeout_s: 3600
+  morf:
+    score_threshold: 0.725     # AIUPred binding score for calling a MoRF residue
     min_len: 5                 # minimum contiguous MoRF segment length (residues)
   consensus:
-    disorder_min_tracks: 2     # residue flagged "disordered" if >= this many tracks agree
-    disorder_cutoff: 0.5
+    disorder_cutoff: 0.5       # AIUPred disorder score above which a residue is disordered
+    min_region_len: 10         # gaps between domains are split into disordered / linker runs
+                               # at least this long (shorter runs merge into a neighbour)
 
 # ── Stage 2: ABCfold run ────────────────────────────────────────────────────
 abcfold:
@@ -205,6 +206,8 @@ minimize:
 # ── Stage 3f: reports ──────────────────────────────────────────────────────
 report:
   figure_formats: ["svg", "pdf"]   # NEVER png/jpeg
+  figure_theme: "dark"              # dark (matches report/custom.css) | light (print / slides)
+  figure_transparent: false         # true: no figure background, figures sit on the report page
   datavzrd: true                    # tabular report items rendered via the datavzrd wrapper
   plip_heatmaps:
     strata: ["backend", "cluster", "total"]

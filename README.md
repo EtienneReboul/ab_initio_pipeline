@@ -125,8 +125,9 @@ need to do anything for:
        profile stage 2 uses),
 
      then writes `configs/<first_system_name>.yaml` from your answers
-     (leaving `domains: {}` and `annotation_reviewed: false` — you curate
-     those after stage 1's annotation step, same as any system). Answering
+     (a UniProt-style FASTA header, `sp|ACC|…` / `tr|ACC|…`, fills that
+     chain's `uniprot:` so stage 1 reads InterPro's precomputed domains; no
+     `domains:` block — stage 1's domain map is used as is). Answering
      nothing at the FASTA-path prompt skips this and leaves the file for
      you to write later.
    - Runs `git init` and creates an initial commit, so the generated
@@ -177,7 +178,7 @@ however many chains your FASTA has).
 
 `cd` into the new project directory and follow **its own `README.md`**
 ("Quick start") to actually run the pipeline — install its controller conda
-env, review the stage-1 annotation output, and run the three stages in
+env (and start docker, for AIUPred disorder), and run the three stages in
 order. That README also has the full "Running on IFB vs. another SLURM
 cluster" / "Non-SLURM schedulers" guidance if you picked `pbs`/`htcondor`
 or a non-IFB SLURM site.
