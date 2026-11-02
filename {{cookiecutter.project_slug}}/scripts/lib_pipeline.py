@@ -11,6 +11,7 @@ per-rule conda envs.
 """
 from __future__ import annotations
 
+import ast
 import copy
 from pathlib import Path
 from typing import Any
@@ -75,6 +76,14 @@ def load_system(name: str, repo_root: Path | str = REPO_ROOT) -> dict:
         spec["plip_passes"] = passes or [
             {"name": "main", "dnareceptor": False, "fix_pdb": False, "chains": None}
         ]
+
+    # PLIP's --chains reads exactly [receptor, ligand]: a third group is
+    # silently ignored, so put every ligand chain in the second list.
+    for p in spec["plip_passes"]:
+        if p.get("chains") and len(ast.literal_eval(p["chains"])) != 2:
+            raise ValueError(
+                f"{name}: plip_passes '{p['name']}' chains {p['chains']!r} must be "
+                "exactly two groups, [[receptor...], [ligand...]]")
 
     if isinstance(spec.get("plip"), dict) and "plip_host" not in spec:
         spec["plip_host"] = {

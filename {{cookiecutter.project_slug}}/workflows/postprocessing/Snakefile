@@ -188,12 +188,16 @@ rule minimize_cif:
     params:
         outdir=str(POST / "{system}" / "minimized" / "{cluster}" / "{fname}"),
         chimerax=CHIMERAX,
+        # ligand chains (e.g. a bond-bridging GLY) have no force-field
+        # template, so they are dropped before minimization
+        drop=lambda wc: ",".join(s["id"] for s in SPECS[wc.system]["sequences"]
+                                 if s.get("type") == "ligand") or "-",
     log:
         str(LOG / "{system}" / "{cluster}" / "{fname}_minimize.log"),
     shell:
         r"""
         mkdir -p {params.outdir}
-        {params.chimerax} --nogui --script "scripts/minimize_cif.py {input.cif} {output.pdb}" > {log} 2>&1
+        {params.chimerax} --nogui --script "scripts/minimize_cif.py {input.cif} {output.pdb} {params.drop}" > {log} 2>&1
         """
 
 

@@ -63,7 +63,9 @@ domains:
 # ── PLIP passes ────────────────────────────────────────────────────────
 # Generalises the DRB2 pipeline's hard-coded plip / plip_rna_ligands /
 # plip_drb2_drb4 triple. One `run_plip` + aggregate per entry.
-#   chains: PLIP --chains string "[['A'],['B','C']]" (receptor groups first),
+#   chains: PLIP --chains string "[['A'],['B','C']]": exactly two groups,
+#           receptor chains then ligand chains (PLIP ignores a third group;
+#           contacts stay per chain, so one ligand group loses nothing),
 #           or null to omit --chains (auto-detect every non-receptor as its
 #           own ligand — needed for per-nucleotide RNA contacts).
 #   dnareceptor: pass PLIP --dnareceptor (folds NA into the receptor).

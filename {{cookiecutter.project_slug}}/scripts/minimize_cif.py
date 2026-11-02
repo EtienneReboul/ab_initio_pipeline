@@ -3,7 +3,10 @@ ChimeraX Script: CIF Minimization & PDB Export
 ===============================================
 Usage (called by Snakemake, but also works standalone):
 
-    chimerax --nogui --script "minimize_cif.py /path/to/input.cif /path/to/output.pdb"
+    chimerax --nogui --script "minimize_cif.py /path/to/input.cif /path/to/output.pdb [E,F]"
+
+The optional third argument lists ligand chains to delete before minimizing
+("-" or absent: none); OpenMM has no template for them.
 
 What it does:
     1. Opens the CIF file
@@ -114,6 +117,11 @@ def main(session):
 
     session.logger.info(f"Opening: {cif_path.name}")
     run(session, f"open {str(cif_path)!r}")
+
+    drop = [c for c in (sys.argv[3] if len(sys.argv) > 3 else "-").split(",") if c and c != "-"]
+    if drop:
+        session.logger.info(f"Deleting ligand chain(s) before minimization: {', '.join(drop)}")
+        run(session, "delete #1/" + ",".join(drop))
 
     session.logger.info("Sanitizing structure before minimization...")
     results = sanitize(session)
