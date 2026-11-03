@@ -44,6 +44,8 @@ each row's own cif_path for the actual Cα coordinates.
 Outputs, written to <out-root>/<complex>/:
   - pose_clusters.csv        — backend, seed, sample_index, cif_path, cluster,
                                 core_rmsd_to_ref, ptm, iptm, ranking_score
+  - rigid_core.json          — the final anchor core as [chain, resid] pairs
+                                (read by scripts/make_chimerax_align.py)
   - rmsf_profile.svg         — per-residue RMSF of the anchor chain after
                                 core superposition, core highlighted
   - pose_clusters_pca.svg    — 2D PCA of the aligned partner-chain pose
@@ -385,6 +387,16 @@ def main():
         "labels": [[c, int(r)] for c, r in ref_partner_labels],
         "anchor_chains": anchor_chains, "partner_chains": partner_chains,
         "method": args.method, "cluster_info": cluster_info,
+    }, indent=2))
+
+    # rigid core as (chain, resid) so scripts/make_chimerax_align.py can
+    # superpose the models on exactly this subset in ChimeraX
+    (out_dir / "rigid_core.json").write_text(json.dumps({
+        "anchor_chains": anchor_chains,
+        "reference_cif": rows[0]["cif_path"],
+        "n_models": n_used,
+        "core_rmsf_target": args.core_rmsf_target,
+        "core": [[ref_anchor_labels[i][0], int(ref_anchor_labels[i][1])] for i in core_idx],
     }, indent=2))
 
     # PCA fit computed here (not down by the plotting code) so pc1/pc2 can be

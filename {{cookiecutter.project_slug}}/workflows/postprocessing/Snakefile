@@ -83,6 +83,7 @@ rule all:
          for s in SYSTEMS for p in passes(s)],
         [str(REP / s / f"dimreduction_{m}.svg") for s in SYSTEMS for m in DIMR_METRICS],
         [str(REP / s / "minimize_energy.svg") for s in SYSTEMS],
+        [str(POST / s / "chimerax") for s in SYSTEMS],
         [str(REP / s / f"plip_heatmaps_{p}.svg")
          for s in SYSTEMS for p in passes(s)],
         ([str(REP / s / "tables") for s in SYSTEMS] if DATAVZRD else []),
@@ -96,6 +97,7 @@ rule align_anchor:
     output:
         csv=str(POST / "{system}" / "pose_clusters.csv"),
         npy=str(POST / "{system}" / "aligned_partner_ca.npy"),
+        core=str(POST / "{system}" / "rigid_core.json"),
         rmsf=report(str(POST / "{system}" / "rmsf_profile.svg"),
                     category="3. Postprocessing", subcategory="Rigid core / RMSF",
                     labels={"system": "{system}"}),
@@ -170,6 +172,23 @@ checkpoint select_top_n_per_cluster:
           --pose-clusters {input.pose_clusters} \
           --abcfold-output-root {ABC} --out-root {params.out} \
           --top-n {params.top_n} --rank-by {params.rank_by} > {log} 2>&1
+        """
+
+
+# ── 3c'. ChimeraX scripts: selected models superposed on the rigid core ─
+rule chimerax_align:
+    input:
+        core=str(POST / "{system}" / "rigid_core.json"),
+        csv=str(POST / "{system}" / "selected_models.csv"),
+    output:
+        directory(str(POST / "{system}" / "chimerax")),
+    log:
+        str(LOG / "chimerax_align" / "{system}.log"),
+    shell:
+        r"""
+        python scripts/make_chimerax_align.py --system {wildcards.system} \
+          --rigid-core {input.core} --selected-csv {input.csv} \
+          --out-dir {output} > {log} 2>&1
         """
 
 
