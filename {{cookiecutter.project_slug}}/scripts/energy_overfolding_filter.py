@@ -7,7 +7,7 @@ notebooks/rna_complexes_energy_and_overfolding_filter.ipynb.
 
 Two successive filters over the minimized ensemble:
 
-  1. Garbage-energy filter — MAD-z on each model's final ChimeraX
+  1. Garbage-energy filter — MAD-z on each model's final OpenMM
      minimization energy; a model is an energy outlier if |z| > --energy-z.
      A whole backend is dropped if > --backend-drop-frac of its assessed
      models are outliers (RosettaFold3 numeric blow-up in the DRB2 runs).

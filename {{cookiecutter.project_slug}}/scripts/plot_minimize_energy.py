@@ -2,9 +2,9 @@
 """
 scripts/plot_minimize_energy.py — Stage 3 report figure + table
 =============================================================
-Reads every ChimeraX minimize energy trace under
+Reads every OpenMM minimize energy trace under
 results/<system>/minimized/**/<stem>_energy.csv (step,energy_kJ_mol, written
-by scripts/minimize_cif.py) and produces:
+by scripts/minimize_openmm.py) and produces:
 
   * <out>.svg           seaborn line plot of energy vs step, one line per
                         model, coloured by backend (backend parsed from path)
@@ -106,7 +106,7 @@ def main() -> int:
             ax.plot(g["step"], g["energy"], lw=0.5, alpha=0.5)
     ax.set_yscale("symlog")
     ax.set_xlabel("minimization step"); ax.set_ylabel("energy (kJ/mol, symlog)")
-    ax.set_title(f"{a.system}: ChimeraX minimization energy traces")
+    ax.set_title(f"{a.system}: OpenMM minimization energy traces")
     for fmt in a.formats.split(","):
         fig.savefig(f"{out.with_suffix('')}.{fmt.strip()}")
     plt.close(fig)

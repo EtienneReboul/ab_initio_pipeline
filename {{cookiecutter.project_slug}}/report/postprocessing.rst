@@ -13,7 +13,8 @@ aligned on its rigid anchor and analysed.
   cluster.
 * **Interface metrics** — ipSAE, iLIS and Pinc computed for every model in the
   ensemble from its PAE matrix (``interface_metrics.parquet``).
-* **Minimization energy** — ChimeraX energy traces per selected model and a
+* **Minimization energy** — OpenMM (amber14 + GBn2, GAFF2 for
+  free ligands) energy traces per selected model and a
   per-backend failure-rate table (diverged / NaN).
 * **PLIP heatmaps** — domain × domain (or domain × nucleotide) interaction
   counts, one panel set per PLIP pass, stratified total / per backend /

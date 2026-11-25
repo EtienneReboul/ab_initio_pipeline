@@ -112,6 +112,33 @@ def nucleic_chains(spec: dict) -> list[dict]:
     return chains_of_type(spec, _NUCLEIC_TYPES)
 
 
+# Monatomic ions OpenMM's amber14/tip3p.xml has a template for, by CCD code.
+_ION_CCD = {"AL", "BA", "BR", "CA", "CD", "CL", "CO", "CS", "CU", "F", "FE", "FE2",
+            "HG", "IOD", "K", "LI", "MG", "MN", "NA", "NI", "RB", "SR", "ZN"}
+
+
+def ligand_code(seq: dict) -> str | None:
+    """The single CCD code of a ligand entry (None: smiles or several codes)."""
+    ccd = seq.get("ccd")
+    if isinstance(ccd, (list, tuple)):
+        ccd = ccd[0] if len(ccd) == 1 else None
+    return str(ccd) if ccd else None
+
+
+def ligand_kind(seq: dict, spec: dict) -> str:
+    """How stage 3 minimization treats a ligand chain:
+      drop  covalently bonded (`bonds:`) or several CCD residues -- no template
+      ion   monatomic ion with an amber14 template
+      gaff  free ligand, GAFF2 + AM1-BCC (scripts/parametrize_ligands.py)
+    """
+    bonded = {str(atom[0]) for bond in spec.get("bonds") or [] for atom in bond}
+    if norm_id(seq["id"]) in bonded:
+        return "drop"
+    if ligand_code(seq) in _ION_CCD:
+        return "ion"
+    return "gaff" if ligand_code(seq) or seq.get("smiles") else "drop"
+
+
 def norm_id(x) -> str:
     """fold_input.json chain ids may be a list (['A']) for multi-copy chains;
     configs/<system>.yaml uses a bare string. Normalise to the first string."""

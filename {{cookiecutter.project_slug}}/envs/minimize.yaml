@@ -1,0 +1,13 @@
+name: ab-initio-minimize
+# Stage 3d — OpenMM minimization (scripts/minimize_openmm.py). No ChimeraX.
+# OpenMM's conda-forge build ships the OpenCL platform (Apple GPUs included).
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.11
+  - openmm>=8.1
+  - pdbfixer>=1.9
+  - rdkit>=2024.3     # bond orders + hydrogens of ligand chains
+  - numpy>=1.26
+  - pyyaml>=6.0

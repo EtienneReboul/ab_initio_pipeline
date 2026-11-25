@@ -1,0 +1,24 @@
+name: ab-initio-cg2all
+# cg2all (https://github.com/huhlim/cg2all) for minimize.cg2all_fallback: a
+# model whose first energy evaluation is infinite/NaN is rebuilt from its CA
+# trace. Kept apart from envs/minimize.yaml (python 3.10 + an old
+# torch/dgl stack); built by rule cg2all_setup only when the fallback is enabled.
+# Pins follow NanoPulldown's envs/minimize_cg2all.yaml (dgl<=1.0, torch 1.13,
+# e3nn 0.5.1, numpy<2), but dgl and torch come from PyPI: dglteam has no
+# osx-arm64 build and torch's +cpu wheels are Linux-only.
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.10
+  - numpy=1.26
+  - scipy
+  - mdtraj
+  - setuptools<81      # pkg_resources, for the torch 1.13 generation
+  - git
+  - pip
+  - pip:
+      - torch==1.13.1
+      - dgl==1.0.1
+      - e3nn==0.5.1
+      - git+https://github.com/huhlim/cg2all@a00b8816736c08852944f147e39164d0f5e1834e

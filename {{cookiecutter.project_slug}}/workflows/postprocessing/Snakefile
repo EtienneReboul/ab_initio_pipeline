@@ -8,7 +8,8 @@ Run after rsync-ing results/abcfold/ + results/metadata/ back from IFB.
                      aligned_partner_ca.npy + rmsf_profile.svg
   compute_metrics    ipSAE / iLIS / Pinc over the FULL ensemble -> interface_metrics.parquet
   select_top_n       checkpoint: top-N models/cluster -> selected/cluster_<k>/*.cif
-  minimize_cif       ChimeraX energy minimization (+ *_energy.csv trace)
+  parametrize_ligands  GAFF2/AM1-BCC via antechamber (systems with free ligands)
+  minimize_cif       OpenMM energy minimization (+ *_energy.csv trace)
   fix_pdb            pdb4amber + PDBFixer  (per plip_pass.fix_pdb)
   run_plip           Docker PLIP, once per plip_pass in configs/<system>.yaml
   plip_to_csv        pliparser -> summary.csv
@@ -24,7 +25,7 @@ from pathlib import Path
 
 REPO = Path(workflow.basedir).parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
-from lib_pipeline import load_config, load_system  # noqa: E402
+from lib_pipeline import ligand_kind, load_config, load_system  # noqa: E402
 
 configfile: str(REPO / "config.yaml")
 if (REPO / "config.local.yaml").exists():
@@ -48,7 +49,6 @@ SEL = CFG["selection"]
 MZ = CFG["minimize"]
 RPT = CFG["report"]
 DATAVZRD = bool(RPT.get("datavzrd", False))
-CHIMERAX = CFG["chimerax_bin"]
 PLIP_IMAGE = CFG["plip_image"]
 FMTS = ",".join(RPT["figure_formats"])
 
@@ -199,24 +199,71 @@ def selected_targets(wildcards):
 
 
 # ── 3d. minimize ──────────────────────────────────────────────────────
+# GAFF2 + AM1-BCC once per system; only systems with a free ligand need it.
+rule parametrize_ligands:
+    input:
+        spec=str(REPO / "configs" / "{system}.yaml"),
+    output:
+        directory(str(POST / "{system}" / "ligand_params")),
+    params:
+        ccd=str(REPO / "data" / "ccd"),
+    conda:
+        "../../envs/ligand_params.yaml"
+    log:
+        str(LOG / "parametrize_ligands" / "{system}.log"),
+    shell:
+        r"""
+        python scripts/parametrize_ligands.py --spec {input.spec} \
+          --out-dir {output} --ccd-cache {params.ccd} > {log} 2>&1
+        """
+
+
+# cg2all in its own env; its checkpoint lands in that env on first use, so it
+# is fetched here once rather than by concurrent minimize jobs.
+rule cg2all_setup:
+    output:
+        str(POST / "cg2all_bin.txt"),
+    conda:
+        "../../envs/cg2all.yaml"
+    log:
+        str(LOG / "cg2all_setup.log"),
+    shell:
+        r"""
+        bash scripts/cg2all_setup.sh {output} > {log} 2>&1
+        """
+
+
+def cg2all_bin(wildcards):
+    return str(POST / "cg2all_bin.txt") if (MZ.get("cg2all_fallback") or {}).get("enabled") else []
+
+
+def ligand_params(wildcards):
+    spec = SPECS[wildcards.system]
+    if any(s.get("type") == "ligand" and ligand_kind(s, spec) == "gaff" for s in spec["sequences"]):
+        return str(POST / wildcards.system / "ligand_params")
+    return []
+
+
 rule minimize_cif:
     input:
         cif=str(POST / "{system}" / "selected" / "cluster_{cluster}" / "{fname}.cif"),
+        ligands=ligand_params,
+        # a path, not data: an env rebuild must not re-minimize everything
+        cg2all=ancient(cg2all_bin),
     output:
         pdb=str(POST / "{system}" / "minimized" / "{cluster}" / "{fname}" / "{fname}.pdb"),
     params:
-        outdir=str(POST / "{system}" / "minimized" / "{cluster}" / "{fname}"),
-        chimerax=CHIMERAX,
-        # ligand chains (e.g. a bond-bridging GLY) have no force-field
-        # template, so they are dropped before minimization
-        drop=lambda wc: ",".join(s["id"] for s in SPECS[wc.system]["sequences"]
-                                 if s.get("type") == "ligand") or "-",
+        lig=lambda wc, input: f"--ligand-params {input.ligands}" if input.ligands else "",
+        cg=lambda wc, input: f"--cg2all-bin {input.cg2all}" if input.cg2all else "",
+        settings=MZ,    # rerun when minimize: changes
+    conda:
+        "../../envs/minimize.yaml"
     log:
         str(LOG / "{system}" / "{cluster}" / "{fname}_minimize.log"),
     shell:
         r"""
-        mkdir -p {params.outdir}
-        {params.chimerax} --nogui --script "scripts/minimize_cif.py {input.cif} {output.pdb} {params.drop}" > {log} 2>&1
+        python scripts/minimize_openmm.py --cif {input.cif} --pdb {output.pdb} \
+          --system {wildcards.system} {params.lig} {params.cg} > {log} 2>&1
         """
 
 

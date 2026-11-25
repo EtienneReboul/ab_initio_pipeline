@@ -25,7 +25,10 @@ sequences:
   # sequence itself (needs annotate.interproscan.email).
   # type: ligand takes exactly one of `ccd` (code or list of codes) or `smiles`
   # (passed through to fold_input.json); ligands are ignored by annotation and
-  # pose clustering.
+  # pose clustering. In stage 3, a free ligand is minimized with GAFF2 + AM1-BCC
+  # (antechamber, pH 7 protonation; `protonation: as_is` keeps the given state),
+  # monatomic ions use amber14 templates, and ligands named in `bonds:` or with
+  # several CCD codes are dropped before minimization.
 
 # ── Covalent bonds (optional) ─────────────────────────────────────────────
 # -> fold_input.json `bondedAtomPairs`. [[chain, residue, atom], [chain,

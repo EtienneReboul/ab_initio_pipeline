@@ -50,7 +50,7 @@ No script edits.
 │  anchor rigid-core Kabsch alignment (one per anchor_chains entry)          │
 │  interface metrics over the FULL ensemble:  ipSAE · iLIS · Pinc             │
 │  pose clustering (HDBSCAN + Optuna/DBCV, or GMM/BIC)                        │
-│  top-N/cluster ─► ChimeraX minimize ─► fix_pdb ─► PLIP ×passes ─► aggregate │
+│  top-N/cluster ─► OpenMM minimize ─► fix_pdb ─► PLIP ×passes ─► aggregate   │
 │  ─► reports/postprocessing.zip   (dim-reduction panels, PLIP heatmaps, …)   │
 └────────────────────────────────────────────────────────────────────────────┘
 ```

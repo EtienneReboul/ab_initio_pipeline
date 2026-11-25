@@ -11,7 +11,7 @@ views:
   minimize_failure_rate:
     dataset: minimize_failure_rate
     desc: |
-      Per-backend ChimeraX minimization outcome: how many selected models
+      Per-backend OpenMM minimization outcome: how many selected models
       diverged (`|final energy| > max_abs_energy`) or ended up NaN.
       A backend with no models selected for this system has no row here —
       there was nothing to minimize.

@@ -1,0 +1,16 @@
+name: ab-initio-ligand-params
+# Stage 3d' — GAFF2 / AM1-BCC ligand parameters (scripts/parametrize_ligands.py).
+# Built only when a system declares a non-covalent `type: ligand` chain.
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.11
+  - ambertools>=23     # antechamber, parmchk2, sqm
+  - openmmforcefields>=0.14
+  - openff-toolkit-base>=0.16
+  - openmm>=8.1
+  - rdkit>=2024.3
+  - gemmi>=0.6         # CCD definitions
+  - numpy>=1.26
+  - pyyaml>=6.0

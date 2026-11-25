@@ -197,11 +197,31 @@ selection:
   top_n: 100000               # effectively "all" — .head(top_n) caps at the cluster's real size
   rank_by: "ranking_score"    # backend's own ranking score; falls back to iptm when missing
 
-# ── Stage 3e: ChimeraX minimization (early-stop guard for numeric blow-up) ──
+# ── Stage 3e: OpenMM minimization (early-stop guard for numeric blow-up) ────
+# amber14-all = ff14SB protein + OL3 RNA + OL15 DNA. Free ligands get GAFF2 +
+# AM1-BCC (antechamber); ions use amber14 templates; see configs/_schema.md.
 minimize:
-  max_abs_energy: 1.0e15      # |energy| kJ/mol above this = diverged, stop and flag
-  divergence_factor: 100.0    # energy rising by more than this x its running min = diverged
-  max_steps: 1000
+  forcefield: ["amber14-all.xml", "implicit/gbn2.xml"]
+  platform_preference: ["OpenCL"]   # first that starts; e.g. ["CUDA", "OpenCL"]. No implicit CPU fallback
+  max_abs_energy: 1.0e15      # |energy| kJ/mol above this after pre-relaxation = diverged, stop and flag
+  divergence_factor: 100.0    # energy positive and > this x |start| at probe_steps = diverged
+  probe_steps: 200
+  max_steps: 2000
+  trace_interval: 50          # record energy every N iterations (-> *_energy.csv)
+  convergence_delta: 1.0e-3   # kJ/mol: stop once a chunk changes energy by less than this
+  max_minutes: 75             # wall-clock budget: past it, save unconverged. 0 = none
+  pre_relax:                  # charge-free vacuum pass that pulls overlaps apart first
+    enabled: true
+    forcefield: ["amber14-all.xml"]
+    cutoff_nm: 1.0
+    max_steps: 500
+  cg2all_fallback:            # model whose first evaluation is infinite/NaN: protein chains rebuilt from
+                              # their CA trace, then minimized again. false = those models fail, and
+                              # envs/cg2all.yaml + its ~49 MB Zenodo checkpoint are not installed
+    enabled: true
+    model: CalphaBasedModel
+    device: cpu
+    timeout_s: 900
 
 # ── Stage 3f: reports ──────────────────────────────────────────────────────
 report:
